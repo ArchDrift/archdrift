@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { analyzeDocument, isSupportedFile, AnalysisResult, LayerViolation, countCodeLines, calculateSII, RawIssue } from './analyzer';
+import { analyzeDocument, isSupportedFile, AnalysisResult, LayerViolation, countCodeLines, calculateDrift, isProductionCode, RawIssue, VIOLATION_WEIGHTS } from './analyzer';
 import { generateWorkspaceReport, writeReportToOutputChannel, generateMarkdownReport } from './reportGenerator';
 
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -77,33 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
             });
             outputChannel.appendLine(`[ArchDrift Report] Test files found: ${testFiles.length} (will be scanned but excluded from score)`);
             
-            // Helper function to check if file is production code (STRICT: only src/ or core/ logic)
-            // Completely ignore node_modules, dist, tests - they are not part of the 'System Truth'
-            const isProductionCode = (filePath: string): boolean => {
-                const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
-                
-                // Exclude all test/build artifacts
-                if (normalizedPath.includes('/test') || 
-                    normalizedPath.includes('/tests/') ||
-                    normalizedPath.includes('/__tests__/') ||
-                    normalizedPath.includes('/dist/') ||
-                    normalizedPath.includes('/node_modules/') ||
-                    normalizedPath.includes('/build/') ||
-                    normalizedPath.includes('/coverage/') ||
-                    normalizedPath.includes('/spec/') ||
-                    normalizedPath.endsWith('.test.ts') ||
-                    normalizedPath.endsWith('.test.js') ||
-                    normalizedPath.endsWith('.spec.ts') ||
-                    normalizedPath.endsWith('.spec.js')) {
-                    return false;
-                }
-                
-                // Include src/, core/, lib/, and packages/ directories (production code sources)
-                return normalizedPath.includes('/src/') || 
-                       normalizedPath.includes('/core/') || 
-                       normalizedPath.includes('/lib/') || 
-                       normalizedPath.includes('/packages/');
-            };
+            // Use exported isProductionCode function (checks .gitignore and test patterns, no hardcoding)
             
             // Scan all files and collect diagnostics + LOC
             const allDiagnostics: Array<{ uri: vscode.Uri; diagnostic: vscode.Diagnostic }> = [];
@@ -155,7 +129,7 @@ export function activate(context: vscode.ExtensionContext) {
                             totalProductionFiles++;
                         }
                         
-                        // Collect raw issues for SII calculation (tag with file path for filtering)
+                        // Collect raw issues for drift calculation (tag with file path for filtering)
                         result.rawIssues.forEach(issue => {
                             // Add file path to issue for filtering
                             (issue as any).filePath = filePath;
@@ -163,7 +137,10 @@ export function activate(context: vscode.ExtensionContext) {
                         });
                         
                         // Build diagnostics from raw issues (include all for report, but filter for score)
+                        // Tag each issue with filePath for filtering and include code snippets for CI/CD evidence
                         result.rawIssues.forEach(issue => {
+                            // Tag issue with filePath for production code filtering
+                            (issue as any).filePath = fileUri.fsPath;
                             try {
                                 let range: vscode.Range;
                                 if (issue.range) {
@@ -270,26 +247,27 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             });
 
-            // Filter raw issues to production code only for score calculation
+            // Filter raw issues to production code only for drift calculation
             const productionRawIssues = allRawIssues.filter((issue) => {
                 const filePath = (issue as any).filePath;
-                return filePath ? isProductionCode(filePath) : false;
+                return filePath ? isProductionCode(filePath, workspaceRoot) : false;
             });
             
-            // Use calculateSII with strict mode (density-based with logarithmic floor)
-            const siiResult = calculateSII(productionRawIssues, totalProductionLOC, totalProductionFiles, true);
-            const integrityIndexRounded = siiResult.sii;
-            const weightedDebt = siiResult.weightedDebt;
-            const weightedDebtDensity = siiResult.weightedDebtDensity;
-            const productionIssues = siiResult.productionIssues;
+            // Use calculateDrift with strict mode (density-based with logarithmic ceiling)
+            // CI/CD Gatekeeper: 0% = perfect (no drift), 100% = total drift
+            const driftResult = calculateDrift(productionRawIssues, totalProductionLOC, totalProductionFiles, true, workspaceRoot);
+            const driftScoreRounded = driftResult.driftScore;
+            const weightedDebt = driftResult.weightedDebt;
+            const weightedDebtDensity = driftResult.weightedDebtDensity;
+            const productionIssues = driftResult.productionIssues;
             
-            // Debug score calculation
+            // Debug drift calculation
             outputChannel.appendLine(`[ArchDrift Report] Production code: ${productionIssues} issues (${weightedDebt} weighted debt) in ${totalProductionLOC.toLocaleString()} LOC across ${totalProductionFiles} files`);
-            outputChannel.appendLine(`[ArchDrift Report] Weighted Debt Density: ${weightedDebtDensity.toFixed(2)} debt points/KLoC → Integrity Index: ${integrityIndexRounded}%`);
+            outputChannel.appendLine(`[ArchDrift Report] Weighted Debt Density: ${weightedDebtDensity.toFixed(2)} debt points/KLoC → Architectural Drift: ${driftScoreRounded}%`);
 
             // Get top 5 offenders (production code only - no test files)
             const topOffenders = Array.from(fileIssueCounts.entries())
-                .filter(([filePath]) => isProductionCode(filePath))
+                .filter(([filePath]) => isProductionCode(filePath, workspaceRoot))
                 .sort((a, b) => b[1].count - a[1].count)
                 .slice(0, 5);
 
@@ -319,30 +297,28 @@ export function activate(context: vscode.ExtensionContext) {
                 return '🟢 Low';
             };
 
-            // Calculate Integrity Bar (10 slots)
-            const filledSlots = Math.round((integrityIndexRounded / 100) * 10);
+            // Calculate Drift Bar (10 slots) - CI/CD Gatekeeper: 0% = perfect, 100% = total drift
+            const filledSlots = Math.round((driftScoreRounded / 100) * 10);
             const emptySlots = 10 - filledSlots;
-            const integrityBar = '█'.repeat(filledSlots) + '░'.repeat(emptySlots);
+            const driftBar = '█'.repeat(filledSlots) + '░'.repeat(emptySlots);
 
-            // No status labels - just the Integrity Index
-
-            // Generate markdown report - Architectural Truth, not marketing
+            // Generate markdown report - CI/CD Gatekeeper format
             const workspaceName = workspaceFolder.name;
-            let markdown = `# 🛡️ ArchDrift Structural Decay Analysis\n\n`;
+            let markdown = `# 🛡️ ArchDrift Architectural Drift Analysis\n\n`;
             markdown += `**Workspace:** ${workspaceName}\n\n`;
             markdown += `---\n\n`;
             
-            // Consolidated Header - Structural Stability Signal (no % sign, no grade)
-            markdown += `## Structural Stability Signal: **${integrityIndexRounded}**\n\n`;
-            markdown += `[${integrityBar}]\n\n`;
+            // CI/CD Gatekeeper Header - Architectural Drift (0% = perfect, 100% = total drift)
+            markdown += `## Architectural Drift: **${driftScoreRounded}%**\n\n`;
+            markdown += `[${driftBar}]\n\n`;
             
             // Expert Diagnosis Section
             let hotspot = 'Unknown';
             let threatPattern = 'Unknown';
             let riskFactor = 'Unknown';
             
-            // Handle perfect score (100%) - show "Perfect Architecture" message
-            if (integrityIndexRounded >= 100 && allDiagnostics.length === 0) {
+            // Handle perfect score (0% drift) - show "Perfect Architecture" message
+            if (driftScoreRounded <= 0 && allDiagnostics.length === 0) {
                 hotspot = 'N/A';
                 threatPattern = 'Perfect Architecture';
                 riskFactor = 'No violations detected';
@@ -372,11 +348,11 @@ export function activate(context: vscode.ExtensionContext) {
                 sortedPatterns.forEach(([pattern, data]) => {
                     let weight = 0;
                     if (pattern === 'Layer Violation') {
-                        weight = data.count * 10;
+                        weight = data.count * VIOLATION_WEIGHTS.layerViolation;
                     } else if (pattern === 'N+1 Query') {
-                        weight = data.count * 4;
+                        weight = data.count * VIOLATION_WEIGHTS.nPlusOneQuery;
                     } else if (pattern === 'God Class') {
-                        weight = data.count * 1;
+                        weight = data.count * VIOLATION_WEIGHTS.godClassMonolith;
                     }
                     patternWeights.set(pattern, weight);
                 });
@@ -396,7 +372,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
             
             markdown += `### 🧠 Expert Diagnosis\n\n`;
-            if (integrityIndexRounded >= 100 && allDiagnostics.length === 0) {
+            if (driftScoreRounded <= 0 && allDiagnostics.length === 0) {
                 markdown += `✅ **Perfect Architecture** - No violations detected. The codebase maintains structural integrity with zero architectural drift.\n\n`;
             } else {
                 markdown += `The primary source of architectural drift is located in the **${hotspot}**. `;
@@ -457,14 +433,14 @@ export function activate(context: vscode.ExtensionContext) {
             fullDetailsMarkdown += `## Weighted Debt Calculation\n\n`;
             fullDetailsMarkdown += `**Weighted Debt Density:** ${weightedDebtDensity.toFixed(2)} debt points per 1,000 lines of production code\n\n`;
             fullDetailsMarkdown += `**Severity Multipliers:**\n`;
-            fullDetailsMarkdown += `- Layer Violations: ×10 (Fatal structural drift)\n`;
-            fullDetailsMarkdown += `- N+1 Queries: ×4 (Core efficiency drift)\n`;
-            fullDetailsMarkdown += `- God Classes: ×1 (Complexity drift)\n\n`;
+            fullDetailsMarkdown += `- Layer Violations: ×${VIOLATION_WEIGHTS.layerViolation} (Fatal structural drift)\n`;
+            fullDetailsMarkdown += `- N+1 Queries: ×${VIOLATION_WEIGHTS.nPlusOneQuery} (Core efficiency drift)\n`;
+            fullDetailsMarkdown += `- God Class Monoliths: ×${VIOLATION_WEIGHTS.godClassMonolith} (Complexity drift)\n\n`;
             fullDetailsMarkdown += `**Production Code:** ${productionIssues} violations (${weightedDebt} weighted debt) in ${totalProductionLOC.toLocaleString()} LOC\n\n`;
             fullDetailsMarkdown += `**Total Violations (including tests):** ${allDiagnostics.length}\n\n`;
             
             // Show test file violations count
-            const testFileViolations = allDiagnostics.filter(({ uri }) => !isProductionCode(uri.fsPath)).length;
+            const testFileViolations = allDiagnostics.filter(({ uri }) => !isProductionCode(uri.fsPath, workspaceRoot)).length;
             if (testFileViolations > 0) {
                 fullDetailsMarkdown += `**Test File Violations:** ${testFileViolations} (excluded from score calculation)\n\n`;
             }
@@ -478,7 +454,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const patternMatch = diagnostic.message.match(/^\[([^\]]+)\]/);
                 const pattern = patternMatch ? patternMatch[1] : 'Unknown';
                 const line = diagnostic.range.start.line + 1; // 1-indexed
-                const isProduction = isProductionCode(uri.fsPath);
+                const isProduction = isProductionCode(uri.fsPath, workspaceRoot);
                 
                 if (!violationsByPattern.has(pattern)) {
                     violationsByPattern.set(pattern, new Map());
@@ -549,7 +525,15 @@ export function activate(context: vscode.ExtensionContext) {
                         violations.forEach(({ diagnostic, line }) => {
                             // Extract message without [Pattern] prefix
                             const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
-                            fullDetailsMarkdown += `- **Line ${line}:** ${message}\n`;
+                            
+                            // Find corresponding raw issue for code snippet (CI/CD evidence)
+                            const rawIssue = allRawIssues.find(issue => {
+                                const issueFilePath = (issue as any).filePath;
+                                return issueFilePath === filePath && issue.line === line;
+                            });
+                            
+                            const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
+                            fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
                         });
                         
                         fullDetailsMarkdown += `\n`;
@@ -579,7 +563,15 @@ export function activate(context: vscode.ExtensionContext) {
                         violations.sort((a, b) => a.line - b.line);
                         violations.forEach(({ diagnostic, line }) => {
                             const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
-                            fullDetailsMarkdown += `- **Line ${line}:** ${message}\n`;
+                            
+                            // Find corresponding raw issue for code snippet (CI/CD evidence)
+                            const rawIssue = allRawIssues.find(issue => {
+                                const issueFilePath = (issue as any).filePath;
+                                return issueFilePath === filePath && issue.line === line;
+                            });
+                            
+                            const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
+                            fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
                         });
                         fullDetailsMarkdown += `\n`;
                     });
@@ -621,7 +613,15 @@ export function activate(context: vscode.ExtensionContext) {
                             violations.forEach(({ diagnostic, line }) => {
                                 // Extract message without [Pattern] prefix
                                 const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
-                                fullDetailsMarkdown += `- **Line ${line}:** ${message}\n`;
+                                
+                                // Find corresponding raw issue for code snippet (CI/CD evidence)
+                                const rawIssue = allRawIssues.find(issue => {
+                                    const issueFilePath = (issue as any).filePath;
+                                    return issueFilePath === filePath && issue.line === line;
+                                });
+                                
+                                const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
+                                fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
                             });
                             
                             fullDetailsMarkdown += `\n`;

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { analyzeDocument, isSupportedFile, getNormalizedRelativePath, AnalysisResult } from './analyzer';
+import { analyzeDocument, isSupportedFile, getNormalizedRelativePath, AnalysisResult, DriftComparisonResult } from './analyzer';
 
 export interface WorkspaceReport {
     timestamp: string;
@@ -392,3 +392,76 @@ export function generateMarkdownReport(report: WorkspaceReport, workspaceRoot: s
     return markdown;
 }
 
+/**
+ * Generates a concise PR summary markdown for GitHub PR comments
+ * @param comparisonResult Result from compareDrift()
+ * @param newViolationsDetails Optional detailed breakdown of new violations
+ * @returns Markdown string (5-10 lines) suitable for PR comment
+ */
+export function generatePRSummary(comparisonResult: DriftComparisonResult, newViolationsDetails?: {
+    godClasses: Array<{ filePath: string; lineCount: number }>;
+    nPlusOneQueries: Array<{ filePath: string; lineNumber: number }>;
+    layerViolations: Array<{ filePath: string; lineNumber: number; violation: string }>;
+}): string {
+    const sign = comparisonResult.driftChange >= 0 ? '+' : '';
+    const driftChangeFormatted = `${sign}${comparisonResult.driftChange.toFixed(2)}`;
+    const driftChangePercentFormatted = `${sign}${comparisonResult.driftChangePercent.toFixed(1)}`;
+    
+    // Status emoji
+    const statusEmoji = comparisonResult.status === 'PASS' ? '✅' : comparisonResult.status === 'WARN' ? '⚠️' : '❌';
+    
+    let markdown = `## ArchDrift PR Analysis\n\n`;
+    markdown += `**Drift Change:** ${driftChangeFormatted} (${driftChangePercentFormatted}%)\n`;
+    markdown += `**Base Drift:** ${comparisonResult.baseDrift.toFixed(2)}\n`;
+    markdown += `**Head Drift:** ${comparisonResult.headDrift.toFixed(2)}\n\n`;
+    
+    // New violations summary
+    if (comparisonResult.newViolations.total > 0) {
+        markdown += `**New Violations:** ${comparisonResult.newViolations.total}\n`;
+        if (newViolationsDetails) {
+            if (newViolationsDetails.godClasses.length > 0) {
+                markdown += `- God Classes: ${newViolationsDetails.godClasses.length}\n`;
+            }
+            if (newViolationsDetails.nPlusOneQueries.length > 0) {
+                markdown += `- N+1 Queries: ${newViolationsDetails.nPlusOneQueries.length}\n`;
+            }
+            if (newViolationsDetails.layerViolations.length > 0) {
+                markdown += `- Layer Violations: ${newViolationsDetails.layerViolations.length}\n`;
+            }
+        }
+        markdown += `\n`;
+    } else {
+        markdown += `**New Violations:** None\n\n`;
+    }
+    
+    // Status
+    markdown += `**Status:** ${statusEmoji} ${comparisonResult.status}`;
+    if (comparisonResult.status === 'PASS') {
+        markdown += ` (drift increased < 1%)`;
+    } else if (comparisonResult.status === 'WARN') {
+        markdown += ` (drift increased 1-5%)`;
+    } else {
+        markdown += ` (drift increased > 5%)`;
+    }
+    
+    return markdown;
+}
+
+/**
+ * Writes PR summary to PR_SUMMARY.md file
+ * @param comparisonResult Result from compareDrift()
+ * @param outputPath Path to write PR_SUMMARY.md
+ * @param newViolationsDetails Optional detailed breakdown of new violations
+ */
+export function writePRSummary(
+    comparisonResult: DriftComparisonResult,
+    outputPath: string,
+    newViolationsDetails?: {
+        godClasses: Array<{ filePath: string; lineCount: number }>;
+        nPlusOneQueries: Array<{ filePath: string; lineNumber: number }>;
+        layerViolations: Array<{ filePath: string; lineNumber: number; violation: string }>;
+    }
+): void {
+    const summary = generatePRSummary(comparisonResult, newViolationsDetails);
+    fs.writeFileSync(outputPath, summary, 'utf-8');
+}

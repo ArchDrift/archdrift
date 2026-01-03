@@ -3,9 +3,42 @@ node_modules
 .vscode-test/
 *.vsix
 
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Research and development artifacts
+all-cursor-chats/
+test-results-backup/
+ai-feed.json
+*.vsix
+
 # Audit targets and benchmarks
 audit_targets/
 benchmarks/
+
+# Private data (keep LANDSCAPE_MOAT.json private, use dist/ version for public)
+LANDSCAPE_MOAT.json
+LANDSCAPE_MOAT_README.md
+LAUNCH_LEADERBOARD.md
+CHAT_TIMELINE_ANALYSIS.md
+FILE_LOCATIONS.md
+STRUCTURAL_LANDSCAPE.md
+METHODOLOGY.md
+# Note: ROADMAP.md is public and should be committed
+
+# Temporary files
+temp/
+*.log
+
+# Extension-generated audit reports (old naming)
+.driftguard/
+
+# Dashboard build artifacts
+dashboard/.next/
+dashboard/out/
+dashboard/node_modules/
 
 
 

@@ -1,0 +1,522 @@
+{
+  "generated": "2026-01-03T23:43:38.194Z",
+  "totalRepos": 43,
+  "repos": [
+    {
+      "name": "axios",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 0
+      },
+      "files": 9,
+      "loc": 661
+    },
+    {
+      "name": "express",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 0
+      },
+      "files": 6,
+      "loc": 1139
+    },
+    {
+      "name": "lucide",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 0
+      },
+      "files": 198,
+      "loc": 3450
+    },
+    {
+      "name": "solid",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: signal.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 1
+      },
+      "files": 42,
+      "loc": 5110
+    },
+    {
+      "name": "prettier",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: handle-comments.js, needs-parentheses.js, flow-estree.d.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 4
+      },
+      "files": 468,
+      "loc": 37101
+    },
+    {
+      "name": "turbo",
+      "drift": 0,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 0
+      },
+      "files": 248,
+      "loc": 12353
+    },
+    {
+      "name": "storybook",
+      "drift": 0.1,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: results.mock.ts, JsonNodes.tsx, Modal.stories.tsx Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 1,
+        "godClass": 9
+      },
+      "files": 1879,
+      "loc": 166386
+    },
+    {
+      "name": "shadcn-ui",
+      "drift": 0.3,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: fetcher.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 1,
+        "godClass": 0
+      },
+      "files": 192,
+      "loc": 23682
+    },
+    {
+      "name": "create-t3-app",
+      "drift": 0.4,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: ogFont.js, ogFont.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 2,
+        "godClass": 0
+      },
+      "files": 304,
+      "loc": 15146
+    },
+    {
+      "name": "swc",
+      "drift": 0.5,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: Visitor.ts, index.ts, milestone-manager.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 2,
+        "godClass": 2
+      },
+      "files": 254,
+      "loc": 10377
+    },
+    {
+      "name": "pnpm",
+      "drift": 0.7,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: index.js, index.ts, index.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 3,
+        "godClass": 6
+      },
+      "files": 1259,
+      "loc": 95837
+    },
+    {
+      "name": "vue",
+      "drift": 0.8,
+      "expertDiagnosis": "🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: codegen.ts, parser.ts, tokenizer.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 10
+      },
+      "files": 277,
+      "loc": 45952
+    },
+    {
+      "name": "angular",
+      "drift": 1,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: recommendations.ts, sub-navigation-data.ts, animation_timeline_builder.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 1,
+        "nPlusOne": 4,
+        "godClass": 31
+      },
+      "files": 2720,
+      "loc": 255652
+    },
+    {
+      "name": "svelte",
+      "drift": 1,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: elements.d.ts, index.js, entities.js Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 6
+      },
+      "files": 414,
+      "loc": 45557
+    },
+    {
+      "name": "hono",
+      "drift": 1.3,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: index.test.tsx, components.test.tsx, index.test.tsx Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 2,
+        "godClass": 5
+      },
+      "files": 417,
+      "loc": 37570
+    },
+    {
+      "name": "zod",
+      "drift": 1.5,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: types.js, types.ts, schemas.js Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 12
+      },
+      "files": 360,
+      "loc": 48985
+    },
+    {
+      "name": "tldraw",
+      "drift": 1.5,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: admin.tsx, TldrawApp.ts, TLDrawDurableObject.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 17,
+        "godClass": 13
+      },
+      "files": 1408,
+      "loc": 144412
+    },
+    {
+      "name": "immich",
+      "drift": 1.6,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: asset.e2e-spec.ts, library.e2e-spec.ts, timeline.parallel-e2e-spec.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 14,
+        "godClass": 8
+      },
+      "files": 724,
+      "loc": 74428
+    },
+    {
+      "name": "trpc",
+      "drift": 1.8,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: dataLoader.ts, script.output.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 1,
+        "godClass": 1
+      },
+      "files": 226,
+      "loc": 26887
+    },
+    {
+      "name": "plane",
+      "drift": 2.4,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: plans.tsx, base-issues.store.ts, translations.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 9,
+        "godClass": 23
+      },
+      "files": 2993,
+      "loc": 261361
+    },
+    {
+      "name": "cypress",
+      "drift": 2.4,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: useCloudSpecData.ts, event-manager.ts, RemoteRequestDataSource.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 8,
+        "godClass": 33
+      },
+      "files": 1972,
+      "loc": 247564
+    },
+    {
+      "name": "n8n",
+      "drift": 2.5,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: execution.repository.ts, workflow.repository.ts, source-control-import.service.ee.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 2,
+        "nPlusOne": 104,
+        "godClass": 123
+      },
+      "files": 6402,
+      "loc": 876244
+    },
+    {
+      "name": "react",
+      "drift": 2.6,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: eslint-plugin-react-hooks-test-cases.js, CompilerError.ts, Program.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 2,
+        "godClass": 49
+      },
+      "files": 1659,
+      "loc": 253532
+    },
+    {
+      "name": "nest",
+      "drift": 3.1,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: injector.ts, kafka.interface.ts, instance-loader.ts Remediation: Refactor imports to respect layer boundaries—move shared logic to appropriate layers.",
+      "violations": {
+        "layer": 5,
+        "nPlusOne": 0,
+        "godClass": 2
+      },
+      "files": 1223,
+      "loc": 40585
+    },
+    {
+      "name": "remix",
+      "drift": 3.3,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: dom.ts, vdom.test.tsx, vdom.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 5
+      },
+      "files": 191,
+      "loc": 23814
+    },
+    {
+      "name": "tailwindcss",
+      "drift": 4.1,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: canonicalize-candidates.ts, default-theme.ts, utilities.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 4
+      },
+      "files": 170,
+      "loc": 25393
+    },
+    {
+      "name": "node",
+      "drift": 4.5,
+      "expertDiagnosis": "🟡 Stable: Low drift, manageable technical debt. Focus areas: lexer.js, client-h1.js, index.js Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 2,
+        "godClass": 39
+      },
+      "files": 648,
+      "loc": 145609
+    },
+    {
+      "name": "vscode",
+      "drift": 5.2,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: commands.ts, git.ts, model.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 40,
+        "godClass": 230
+      },
+      "files": 4746,
+      "loc": 1037500
+    },
+    {
+      "name": "calcom",
+      "drift": 5.2,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: booking-fields.e2e-spec.ts, managed-user-bookings.e2e-spec.ts, team-bookings.e2e-spec.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 19,
+        "nPlusOne": 271,
+        "godClass": 38
+      },
+      "files": 4906,
+      "loc": 380542
+    },
+    {
+      "name": "vite",
+      "drift": 6,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: index.ts, index.ts, overlay.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 1,
+        "godClass": 13
+      },
+      "files": 300,
+      "loc": 47054
+    },
+    {
+      "name": "playwright",
+      "drift": 6.6,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: injectedScript.ts, recorder.ts, roleUtils.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 8,
+        "godClass": 21
+      },
+      "files": 659,
+      "loc": 215035
+    },
+    {
+      "name": "biome",
+      "drift": 6.7,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: workspace.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 1
+      },
+      "files": 27,
+      "loc": 7221
+    },
+    {
+      "name": "tanstack-query",
+      "drift": 6.8,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: types.ts, Devtools.js, Devtools.tsx Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 10,
+        "godClass": 4
+      },
+      "files": 491,
+      "loc": 42777
+    },
+    {
+      "name": "excalidraw",
+      "drift": 6.9,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: initialData.js, utils.ts, binding.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 20
+      },
+      "files": 408,
+      "loc": 92767
+    },
+    {
+      "name": "payload",
+      "drift": 7.2,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: buildSchema.ts, getTableColumnFromPath.ts, traverseFields.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 87,
+        "godClass": 20
+      },
+      "files": 3624,
+      "loc": 279427
+    },
+    {
+      "name": "bun",
+      "drift": 10.6,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: adapter.ts, index.d.ts, index.tsx Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 6,
+        "godClass": 33
+      },
+      "files": 431,
+      "loc": 110780
+    },
+    {
+      "name": "strapi",
+      "drift": 12.7,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: admin-permissions.ts, DocumentActions.tsx, Relations.tsx Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 7,
+        "nPlusOne": 115,
+        "godClass": 6
+      },
+      "files": 2861,
+      "loc": 201716
+    },
+    {
+      "name": "lodash",
+      "drift": 13.8,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: firebug-lite-debug.js Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 1
+      },
+      "files": 13,
+      "loc": 26256
+    },
+    {
+      "name": "typescript",
+      "drift": 18.2,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: binder.ts, builder.ts, checker.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 68
+      },
+      "files": 422,
+      "loc": 258489
+    },
+    {
+      "name": "esbuild",
+      "drift": 18.4,
+      "expertDiagnosis": "🟠 Eroding: Moderate drift, requires attention. Priority refactoring: common.ts Remediation: Split large files into focused modules—extract related functionality into separate files.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 0,
+        "godClass": 1
+      },
+      "files": 19,
+      "loc": 5133
+    },
+    {
+      "name": "prisma",
+      "drift": 20.1,
+      "expertDiagnosis": "🔴 Critical: High drift, urgent refactoring needed. Critical files: mariadb.ts, pg.ts, serializeJsonQuery.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 59,
+        "godClass": 3
+      },
+      "files": 881,
+      "loc": 58301
+    },
+    {
+      "name": "nocodb",
+      "drift": 35.2,
+      "expertDiagnosis": "🔴 Critical: High drift, urgent refactoring needed. Critical files: formula-type-validation.ts, useCanvasRender.ts, useCanvasTable.ts Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.",
+      "violations": {
+        "layer": 0,
+        "nPlusOne": 157,
+        "godClass": 56
+      },
+      "files": 1420,
+      "loc": 256827
+    },
+    {
+      "name": "directus",
+      "drift": 61.5,
+      "expertDiagnosis": "🔴 Critical: High drift, urgent refactoring needed. Critical files: snapshots.ts, 20201029C-remove-system-fields.ts, fields.ts Remediation: Refactor imports to respect layer boundaries—move shared logic to appropriate layers.",
+      "violations": {
+        "layer": 309,
+        "nPlusOne": 21,
+        "godClass": 5
+      },
+      "files": 1705,
+      "loc": 102937
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { DOMAIN_WEIGHTS, ProjectDomain, detectProjectDomain } from './config/constants';
 
 export type LayerType = 'api' | 'domain' | 'infra' | 'service' | 'model' | 'lib';
 
@@ -33,6 +34,8 @@ export interface RawIssue {
     message: string;
     severity: DiagnosticSeverityType;
     range?: vscode.Range; // Optional range for file-level issues
+    codeSnippet?: string; // Code snippet for CI/CD evidence (required for all violations)
+    likelyBatched?: boolean; // For N+1: true if wrapped in batching pattern (Promise.all, .map().join(), etc.)
     // Pattern-specific data
     codeLineCount?: number; // For God Class
     godClassTier?: 'Large Class' | 'Monolith'; // Tier for God Class (801-1500 = Large Class, 1501+ = Monolith)
@@ -61,6 +64,13 @@ export interface AnalysisResult {
     summary: IssueSummary;
 }
 
+// Configurable violation weights (can be moved to config file in future)
+export const VIOLATION_WEIGHTS = {
+    layerViolation: 10,    // Layer violations (highest weight - architectural boundary violations)
+    godClassMonolith: 5,    // God Class Monoliths (1501+ LOC for regular files, 2501+ for type files)
+    nPlusOneQuery: 2       // N+1 Queries (reduced from 3 due to false positives)
+} as const;
+
 const GOD_CLASS_THRESHOLD = 800; // Only flag files exceeding 800 LOC
 const SUPPORTED_EXTENSIONS = ['.js', '.ts', '.jsx', '.tsx', '.mjs', '.py', '.java', '.go'];
 
@@ -88,6 +98,61 @@ const FORBIDDEN_DEPENDENCIES: Array<[LayerType, LayerType]> = [
     ['service', 'api'],  // e.g., services/email-service/EmailServiceWrapper.js → api/...
     ['lib', 'api']       // e.g., lib/lexical.js → api/endpoints/...
 ];
+
+/**
+ * Simple .gitignore pattern matcher (handles common patterns for CI/CD)
+ * Returns true if file should be ignored
+ */
+function isGitIgnored(filePath: string, workspaceRoot: string | null): boolean {
+    if (!workspaceRoot) {
+        return false; // Can't check .gitignore without workspace root
+    }
+    
+    const gitignorePath = path.join(workspaceRoot, '.gitignore');
+    if (!fs.existsSync(gitignorePath)) {
+        return false; // No .gitignore file
+    }
+    
+    try {
+        const gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8');
+        const patterns = gitignoreContent.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('#')); // Remove comments and empty lines
+        
+        const normalizedFilePath = path.relative(workspaceRoot, filePath).replace(/\\/g, '/');
+        
+        for (const pattern of patterns) {
+            // Simple pattern matching (handles common cases)
+            // Convert glob patterns to regex-like matching
+            let regexPattern = pattern
+                .replace(/\./g, '\\.')  // Escape dots
+                .replace(/\*/g, '.*')   // * matches anything
+                .replace(/\?/g, '.');   // ? matches single char
+            
+            // Handle leading slash (root-relative)
+            if (pattern.startsWith('/')) {
+                regexPattern = '^' + regexPattern.substring(1);
+            } else {
+                regexPattern = '.*' + regexPattern; // Match anywhere in path
+            }
+            
+            // Handle trailing slash (directory)
+            if (pattern.endsWith('/')) {
+                regexPattern = regexPattern.substring(0, regexPattern.length - 1) + '(/.*)?';
+            }
+            
+            const regex = new RegExp(regexPattern);
+            if (regex.test(normalizedFilePath)) {
+                return true;
+            }
+        }
+    } catch (error) {
+        // If .gitignore parsing fails, don't block analysis
+        console.warn(`[ArchDrift] Failed to parse .gitignore: ${error}`);
+    }
+    
+    return false;
+}
 
 /**
  * Checks if a file extension is supported for analysis
@@ -759,17 +824,19 @@ export function countCodeLines(text: string, languageId: string): number {
 export interface NPlusOneDetectionResult {
     violations: number[]; // Line numbers with violations
     optimizedViolations: number[]; // Line numbers that are optimized (cache, etc.)
+    batchedViolations: number[]; // Line numbers that are likely batched (Promise.all, .map().join(), etc.)
     hasDataLoader: boolean; // File uses DataLoader or loadMany
 }
 
 /**
  * Detects N+1 query patterns: DB/API calls inside loops
- * Now context-aware: checks for DataLoader, cache(), unstable_cache()
+ * Now context-aware: checks for DataLoader, cache(), unstable_cache(), and batching patterns
  */
 export function detectNPlusOneQueries(text: string, languageId: string): NPlusOneDetectionResult {
     const lines = text.split('\n');
     const violations: number[] = [];
     const optimizedViolations: number[] = [];
+    const batchedViolations: number[] = [];
     
     // Check for DataLoader usage
     const hasDataLoader = /dataloader|loadMany|DataLoader/i.test(text);
@@ -780,6 +847,19 @@ export function detectNPlusOneQueries(text: string, languageId: string): NPlusOn
         /unstable_cache\s*\(/,
         /export\s+(const|async\s+function)\s+\w+\s*=\s*cache\s*\(/,
         /export\s+(const|async\s+function)\s+\w+\s*=\s*unstable_cache\s*\(/
+    ];
+    
+    // Batching patterns that indicate queries are likely batched
+    // Promise.all, Promise.allSettled, array.map().join(), etc.
+    const batchingPatterns = [
+        /Promise\.all\s*\(/i,
+        /Promise\.allSettled\s*\(/i,
+        /\.map\s*\([^)]*\)\s*\.(join|then|await)/i,  // .map().join() or .map().then()
+        /\.flatMap\s*\(/i,
+        /\.reduce\s*\(/i,
+        /batch\s*\(/i,
+        /bulk\s*\(/i,
+        /loadMany\s*\(/i
     ];
     
     // Patterns for loop starts
@@ -815,19 +895,21 @@ export function detectNPlusOneQueries(text: string, languageId: string): NPlusOn
             /^\s*for\s+\w+\s+in\s+/,  // for x in ...
             /^\s*while\s+/,            // while ...
         ];
-        const result = detectNPlusOnePython(lines, pythonLoopPatterns, dbApiPatterns, cachePatterns);
+        const result = detectNPlusOnePython(lines, pythonLoopPatterns, dbApiPatterns, cachePatterns, batchingPatterns);
         return {
             violations: result.violations,
             optimizedViolations: result.optimizedViolations,
+            batchedViolations: result.batchedViolations,
             hasDataLoader
         };
     }
 
     // For brace-based languages (JS/TS/Java/Go)
-    const result = detectNPlusOneBraceBased(lines, loopPatterns, dbApiPatterns, cachePatterns);
+    const result = detectNPlusOneBraceBased(lines, loopPatterns, dbApiPatterns, cachePatterns, batchingPatterns);
     return {
         violations: result.violations,
         optimizedViolations: result.optimizedViolations,
+        batchedViolations: result.batchedViolations,
         hasDataLoader
     };
 }
@@ -839,10 +921,12 @@ function detectNPlusOnePython(
     lines: string[],
     loopPatterns: RegExp[],
     dbApiPatterns: RegExp[],
-    cachePatterns: RegExp[]
-): { violations: number[]; optimizedViolations: number[] } {
+    cachePatterns: RegExp[],
+    batchingPatterns: RegExp[]
+): { violations: number[]; optimizedViolations: number[]; batchedViolations: number[] } {
     const violations: number[] = [];
     const optimizedViolations: number[] = [];
+    const batchedViolations: number[] = [];
     const loopStack: { line: number; indent: number }[] = [];
     
     // Track if we're inside a cached function
@@ -883,8 +967,16 @@ function detectNPlusOnePython(
         if (loopStack.length > 0) {
             const hasDbApiCall = dbApiPatterns.some(pattern => pattern.test(line));
             if (hasDbApiCall) {
+                // Check if this is wrapped in a batching pattern (look ahead/behind in context)
+                const contextStart = Math.max(0, i - 5);
+                const contextEnd = Math.min(lines.length, i + 5);
+                const context = lines.slice(contextStart, contextEnd).join('\n');
+                const isBatched = batchingPatterns.some(pattern => pattern.test(context));
+                
                 if (inCachedFunction) {
                     optimizedViolations.push(i + 1); // Optimized, don't penalize
+                } else if (isBatched) {
+                    batchedViolations.push(i + 1); // Likely batched, reduce weight
                 } else {
                     violations.push(i + 1); // 1-indexed for VS Code
                 }
@@ -892,7 +984,7 @@ function detectNPlusOnePython(
         }
     }
 
-    return { violations, optimizedViolations };
+    return { violations, optimizedViolations, batchedViolations };
 }
 
 /**
@@ -902,10 +994,12 @@ function detectNPlusOneBraceBased(
     lines: string[],
     loopPatterns: RegExp[],
     dbApiPatterns: RegExp[],
-    cachePatterns: RegExp[]
-): { violations: number[]; optimizedViolations: number[] } {
+    cachePatterns: RegExp[],
+    batchingPatterns: RegExp[]
+): { violations: number[]; optimizedViolations: number[]; batchedViolations: number[] } {
     const violations: number[] = [];
     const optimizedViolations: number[] = [];
+    const batchedViolations: number[] = [];
     const loopStack: { line: number; braceDepth: number }[] = [];
     let currentBraceDepth = 0;
     
@@ -957,8 +1051,16 @@ function detectNPlusOneBraceBased(
         if (loopStack.length > 0) {
             const hasDbApiCall = dbApiPatterns.some(pattern => pattern.test(line));
             if (hasDbApiCall) {
+                // Check if this is wrapped in a batching pattern (look ahead/behind in context)
+                const contextStart = Math.max(0, i - 5);
+                const contextEnd = Math.min(lines.length, i + 5);
+                const context = lines.slice(contextStart, contextEnd).join('\n');
+                const isBatched = batchingPatterns.some(pattern => pattern.test(context));
+                
                 if (inCachedFunction) {
                     optimizedViolations.push(i + 1); // Optimized, don't penalize
+                } else if (isBatched) {
+                    batchedViolations.push(i + 1); // Likely batched, reduce weight
                 } else {
                     violations.push(i + 1); // 1-indexed for VS Code
                 }
@@ -966,7 +1068,7 @@ function detectNPlusOneBraceBased(
         }
     }
 
-    return { violations, optimizedViolations };
+    return { violations, optimizedViolations, batchedViolations };
 }
 
 /**
@@ -1004,6 +1106,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
     const codeLineCount = countCodeLines(text, languageId);
     const nPlusOneResult = detectNPlusOneQueries(text, languageId);
     const nPlusOneViolations = nPlusOneResult.violations;
+    const nPlusOneBatched = nPlusOneResult.batchedViolations;
     const hasDataLoader = nPlusOneResult.hasDataLoader;
     
     // Detect layer violations
@@ -1078,6 +1181,10 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
             tierMessage = `Large Class detected (${codeLineCount} code lines). Consider splitting into smaller modules.`;
         }
         
+        // Get code snippet (first 3 lines of file for context)
+        const lines = text.split('\n');
+        const codeSnippet = lines.slice(0, Math.min(3, lines.length)).join('\n').substring(0, 200);
+        
         rawIssues.push({
             pattern: 'God Class',
             line: 1,
@@ -1085,6 +1192,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
             message: tierMessage,
             severity: DiagnosticSeverity.Warning,
             range: fileRange,
+            codeSnippet: codeSnippet,
             codeLineCount: codeLineCount,
             godClassTier: tier
         });
@@ -1092,6 +1200,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
     
     // Collect N+1 Query issues
     // Apply DataLoader penalty reduction: 90% reduction if file uses DataLoader
+    // Batched violations get 50% weight reduction (they're likely optimized)
     const nPlusOnePenaltyMultiplier = hasDataLoader ? 0.1 : 1.0;
     const effectiveNPlusOneCount = Math.ceil(nPlusOneViolations.length * nPlusOnePenaltyMultiplier);
     
@@ -1100,15 +1209,27 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
         const lineIndex = Math.max(0, Math.min(lineNumber - 1, document.lineCount - 1));
         try {
             const line = document.lineAt(lineIndex);
+            const isBatched = nPlusOneBatched.includes(lineNumber);
             const message = hasDataLoader 
                 ? `Database/API call inside loop (DataLoader detected - penalty reduced). Consider batching queries or moving the call outside the loop.`
+                : isBatched
+                ? `Database/API call inside loop (likely batched - weight reduced). Consider batching queries or moving the call outside the loop.`
                 : `Database/API call inside loop. Consider batching queries or moving the call outside the loop.`;
+            
+            // Get code snippet (violation line + 2 lines of context)
+            const lines = text.split('\n');
+            const startLine = Math.max(0, lineIndex - 1);
+            const endLine = Math.min(lines.length, lineIndex + 2);
+            const codeSnippet = lines.slice(startLine, endLine).join('\n').substring(0, 200);
+            
             rawIssues.push({
                 pattern: 'N+1 Query',
                 line: lineNumber,
                 column: 0,
                 message: message,
-                severity: DiagnosticSeverity.Warning
+                severity: DiagnosticSeverity.Warning,
+                codeSnippet: codeSnippet,
+                likelyBatched: isBatched
             });
         } catch (error) {
             // Skip invalid line numbers
@@ -1119,16 +1240,24 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
     
     // Collect Layer Violation issues
     layerViolations.forEach(violation => {
-            rawIssues.push({
-                pattern: 'Layer Violation',
-                line: violation.line,
-                column: violation.column,
-                message: `${violation.sourceLayer} module importing from ${violation.targetLayer} ("${violation.importText}"). According to ArchDrift's default rules, ${violation.sourceLayer} must not depend on ${violation.targetLayer}.`,
-                severity: DiagnosticSeverity.Error,
-                importText: violation.importText,
-                sourceLayer: violation.sourceLayer,
-                targetLayer: violation.targetLayer
-            });
+        // Get code snippet (violation line + 2 lines of context)
+        const lines = text.split('\n');
+        const lineIndex = Math.max(0, Math.min(violation.line - 1, lines.length - 1));
+        const startLine = Math.max(0, lineIndex - 1);
+        const endLine = Math.min(lines.length, lineIndex + 2);
+        const codeSnippet = lines.slice(startLine, endLine).join('\n').substring(0, 200);
+        
+        rawIssues.push({
+            pattern: 'Layer Violation',
+            line: violation.line,
+            column: violation.column,
+            message: `${violation.sourceLayer} module importing from ${violation.targetLayer} ("${violation.importText}"). According to ArchDrift's default rules, ${violation.sourceLayer} must not depend on ${violation.targetLayer}.`,
+            severity: DiagnosticSeverity.Error,
+            codeSnippet: codeSnippet,
+            importText: violation.importText,
+            sourceLayer: violation.sourceLayer,
+            targetLayer: violation.targetLayer
+        });
     });
     
     // STEP 2: Build grouped map by pattern with counts
@@ -1149,15 +1278,79 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
 }
 
 /**
- * Calculates the Structural Integrity Index (SII) from analysis results
+ * Checks if a file is production code (not test, not ignored by .gitignore)
+ * CI/CD Gatekeeper: Any supported file is production unless explicitly excluded
+ */
+export function isProductionCode(filePath: string, workspaceRoot: string | null = null): boolean {
+    const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+    
+    // Exclude test patterns (common test file/directory patterns)
+    const testPatterns = [
+        '/test/', '/tests/', '/__tests__/', '/__test__/',
+        '/spec/', '/specs/',
+        '.test.', '.spec.',
+        '/coverage/', '/.nyc_output/',
+        '/bench/', '/benchmark/', '/benchmarks/',
+        '/example/', '/examples/',
+        '/demo/', '/demos/',
+        '/playground/', '/sandbox/'
+    ];
+    
+    if (testPatterns.some(pattern => normalizedPath.includes(pattern) || normalizedPath.endsWith(pattern.replace('/', '')))) {
+        return false;
+    }
+    
+    // Exclude test file extensions
+    if (normalizedPath.endsWith('.test.ts') || normalizedPath.endsWith('.test.js') ||
+        normalizedPath.endsWith('.test.tsx') || normalizedPath.endsWith('.test.jsx') ||
+        normalizedPath.endsWith('.spec.ts') || normalizedPath.endsWith('.spec.js') ||
+        normalizedPath.endsWith('.spec.tsx') || normalizedPath.endsWith('.spec.jsx')) {
+        return false;
+    }
+    
+    // Exclude build artifacts
+    if (normalizedPath.includes('/dist/') || normalizedPath.includes('/build/') ||
+        normalizedPath.includes('/out/') || normalizedPath.includes('/.next/') ||
+        normalizedPath.includes('/node_modules/') || normalizedPath.includes('/.cache/')) {
+        return false;
+    }
+    
+    // Exclude minified files
+    if (normalizedPath.includes('.min.') || normalizedPath.includes('.bundle.')) {
+        return false;
+    }
+    
+    // Check if file is ignored by .gitignore
+    if (isGitIgnored(filePath, workspaceRoot)) {
+        return false;
+    }
+    
+    // Check if file has a supported extension (any supported file is production unless excluded above)
+    const lastDot = normalizedPath.lastIndexOf('.');
+    if (lastDot === -1 || lastDot === normalizedPath.length - 1) {
+        return false; // No extension
+    }
+    const ext = normalizedPath.substring(lastDot);
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+        return false; // Not a supported file type
+    }
+    
+    // If we get here, it's a supported file that's not a test and not ignored
+    return true;
+}
+
+/**
+ * Calculates the Architectural Drift score from analysis results
+ * CI/CD Gatekeeper: 0% = perfect (no drift), 100% = total drift
  * @param rawIssues Array of raw issues from analysis
  * @param productionLOC Total lines of production code
  * @param totalProductionFiles Total number of production files
  * @param strictMode Whether to use density-based scoring with logarithmic floor (default: true)
- * @returns Object containing SII score and related metrics
+ * @param workspaceRoot Workspace root path for .gitignore checking
+ * @returns Object containing drift score and related metrics
  */
-export interface SIICalculationResult {
-    sii: number; // Structural Integrity Index (0-100)
+export interface DriftCalculationResult {
+    driftScore: number; // Architectural Drift (0-100, where 0 = perfect, 100 = total drift)
     weightedDebt: number;
     weightedDebtDensity: number; // Debt points per 1,000 LOC
     productionLOC: number;
@@ -1165,33 +1358,7 @@ export interface SIICalculationResult {
     totalProductionFiles: number;
 }
 
-export function calculateSII(rawIssues: RawIssue[], productionLOC: number, totalProductionFiles: number, strictMode: boolean = true): SIICalculationResult {
-    // Filter to production code only (exclude test files)
-    const isProductionCode = (filePath: string): boolean => {
-        const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
-        
-        // Exclude all test/build artifacts
-        if (normalizedPath.includes('/test') || 
-            normalizedPath.includes('/tests/') ||
-            normalizedPath.includes('/__tests__/') ||
-            normalizedPath.includes('/dist/') ||
-            normalizedPath.includes('/node_modules/') ||
-            normalizedPath.includes('/build/') ||
-            normalizedPath.includes('/coverage/') ||
-            normalizedPath.includes('/spec/') ||
-            normalizedPath.endsWith('.test.ts') ||
-            normalizedPath.endsWith('.test.js') ||
-            normalizedPath.endsWith('.spec.ts') ||
-            normalizedPath.endsWith('.spec.js')) {
-            return false;
-        }
-        
-        // Include src/, core/, lib/, and packages/ directories (production code sources)
-        return normalizedPath.includes('/src/') || 
-               normalizedPath.includes('/core/') || 
-               normalizedPath.includes('/lib/') || 
-               normalizedPath.includes('/packages/');
-    };
+export function calculateDrift(rawIssues: RawIssue[], productionLOC: number, totalProductionFiles: number, strictMode: boolean = true, workspaceRoot: string | null = null, domain?: 'FRAMEWORK' | 'UTILITY' | 'DATABASE' | 'APPLICATION' | 'UNKNOWN'): DriftCalculationResult {
 
     if (strictMode) {
         // STRICT MODE: Proportional density-based penalties
@@ -1206,7 +1373,12 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
             if (issue.pattern === 'Layer Violation') {
                 layerViolations++;
             } else if (issue.pattern === 'N+1 Query') {
-                nPlusOneQueries++;
+                // Batched violations get 50% weight reduction
+                if (issue.likelyBatched) {
+                    nPlusOneQueries += 0.5; // Half weight for batched
+                } else {
+                    nPlusOneQueries++;
+                }
             } else if (issue.pattern === 'God Class') {
                 // Only Monolith counts (threshold varies: 1501 for regular files, 2501 for type/schema files)
                 // Check if it's a type definition file by examining the file path and message
@@ -1237,43 +1409,64 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
             }
         });
         
-        // Calculate weighted violation count
-        // God Classes: weight 5, N+1 Queries: weight 2 (reduced from 3 due to false positives), Layer Violations: weight 10
-        // Reduced N+1 weight because detection is aggressive and catches many false positives
-        const weightedViolations = (godClassMonoliths * 5) + (nPlusOneQueries * 2) + (layerViolations * 10);
+        // Domain-aware calculation: Use domain-specific weights if domain is provided
+        // If domain is not provided, detect it from workspace root or use UNKNOWN
+        const detectedDomain: ProjectDomain = domain || (workspaceRoot ? detectProjectDomain(path.basename(workspaceRoot), { layer: layerViolations, nPlusOne: nPlusOneQueries, godClass: godClassMonoliths }) : 'UNKNOWN');
+        const domainWeights = DOMAIN_WEIGHTS[detectedDomain];
         
-        // Proportional calculation: Score = 100 - ((WeightedViolations / TotalFiles) * 100)
-        // This makes violations proportional to codebase size
+        // Calculate weighted violation count using domain-aware weights
+        const weightedViolations = (godClassMonoliths * domainWeights.godClassMonolith) + 
+                                   (nPlusOneQueries * domainWeights.nPlusOneQuery) + 
+                                   (layerViolations * domainWeights.layerViolation);
+        
+        // Domain-aware drift calculation using weighted densities
+        // Drift = (Structural_Weight * Layer_Density) + (Performance_Weight * N1_Density) + (Complexity_Weight * GodClass_Density)
         const totalFiles = Math.max(totalProductionFiles, 1); // Prevent division by zero
-        const violationDensity = weightedViolations / totalFiles;
-        let score = 100 - (violationDensity * 100);
         
-        // Improved Logarithmic Floor: Better handling for high violation densities
-        // For violationDensity <= 1: Use standard floor
-        // For violationDensity > 1: Use a more forgiving decay that caps minimum around 40-50%
-        let logarithmicFloor: number;
+        // Calculate individual densities
+        const layerDensity = layerViolations / totalFiles;
+        const n1Density = nPlusOneQueries / totalFiles;
+        const godClassDensity = godClassMonoliths / totalFiles;
+        
+        // Apply domain-specific weights to densities
+        const structuralDrift = domainWeights.structuralWeight * (layerDensity * domainWeights.layerViolation + godClassDensity * domainWeights.godClassMonolith) * 100;
+        const performanceDrift = domainWeights.performanceWeight * (n1Density * domainWeights.nPlusOneQuery) * 100;
+        const complexityDrift = domainWeights.complexityWeight * (godClassDensity * domainWeights.godClassMonolith) * 100;
+        
+        // Combined drift score
+        let driftScore = structuralDrift + performanceDrift + complexityDrift;
+        
+        // Calculate overall violation density for ceiling calculation
+        const violationDensity = weightedViolations / totalFiles;
+        
+        // Logarithmic Ceiling: Cap maximum drift for extremely problematic codebases
+        // For violationDensity <= 1: Use standard ceiling
+        // For violationDensity > 1: Use a more forgiving formula that caps maximum around 60-70%
+        let logarithmicCeiling: number;
         if (violationDensity <= 1) {
-            // Standard logarithmic floor for normal cases
-            logarithmicFloor = 40 + (60 * Math.exp(-violationDensity * 2));
-            score = Math.max(score, logarithmicFloor);
+            // Standard logarithmic ceiling for normal cases
+            // Formula: ceiling = 100 - (60 * e^(-violationDensity * 2))
+            // This caps maximum drift at ~100% for extremely bad repos
+            logarithmicCeiling = 100 - (60 * Math.exp(-violationDensity * 2));
+            driftScore = Math.min(driftScore, logarithmicCeiling);
         } else {
             // For high violation densities, use a more forgiving formula
-            // Cap the minimum score around 40-50% even for very high densities
-            // Formula: floor = 40 + (10 * e^(-(violationDensity - 1) * 0.5))
-            // This ensures minimum of ~40% for extremely bad repos
-            logarithmicFloor = 40 + (10 * Math.exp(-(violationDensity - 1) * 0.5));
+            // Cap the maximum drift around 60-70% even for very high densities
+            // Formula: ceiling = 100 - (40 * e^(-(violationDensity - 1) * 0.5))
+            // This ensures maximum of ~60-70% for extremely bad repos
+            logarithmicCeiling = 100 - (40 * Math.exp(-(violationDensity - 1) * 0.5));
             
-            // For high densities, use a square root decay instead of linear
-            // This prevents scores from collapsing too quickly
-            const decayFactor = Math.sqrt(violationDensity);
-            score = Math.max(logarithmicFloor, 100 - (decayFactor * 50));
+            // For high densities, use a square root growth instead of linear
+            // This prevents drift scores from exploding too quickly
+            const growthFactor = Math.sqrt(violationDensity);
+            driftScore = Math.min(logarithmicCeiling, growthFactor * 50);
         }
         
-        // Clamp result between 0 and 100
-        const integrityIndexClamped = Math.min(100, Math.max(0, score));
+        // Clamp result between 0 and 100 (0 = perfect, 100 = total drift)
+        const driftScoreClamped = Math.min(100, Math.max(0, driftScore));
         
         // Round to 1 decimal place for display
-        const integrityIndexRounded = Math.round(integrityIndexClamped * 10) / 10;
+        const driftScoreRounded = Math.round(driftScoreClamped * 10) / 10;
         
         // Calculate weighted debt for reporting
         const weightedDebt = weightedViolations;
@@ -1294,7 +1487,7 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
         }
         
         return {
-            sii: integrityIndexRounded,
+            driftScore: driftScoreRounded,
             weightedDebt,
             weightedDebtDensity,
             productionLOC,
@@ -1314,17 +1507,21 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
 
         rawIssues.forEach(issue => {
             if (issue.pattern === 'Layer Violation') {
-                weightedDebt += 10;
+                weightedDebt += VIOLATION_WEIGHTS.layerViolation;
                 productionIssues++;
             } else if (issue.pattern === 'N+1 Query') {
-                weightedDebt += 4;
+                // Batched violations get 50% weight reduction
+                const weight = issue.likelyBatched 
+                    ? VIOLATION_WEIGHTS.nPlusOneQuery * 0.5 
+                    : VIOLATION_WEIGHTS.nPlusOneQuery;
+                weightedDebt += weight;
                 productionIssues++;
             } else if (issue.pattern === 'God Class') {
                 // Determine tier from godClassTier or message
                 if (issue.godClassTier === 'Monolith') {
-                    weightedDebt += 5;
+                    weightedDebt += VIOLATION_WEIGHTS.godClassMonolith;
                 } else {
-                    weightedDebt += 1; // Large Class
+                    weightedDebt += 1; // Large Class (not counted in strict mode)
                 }
                 productionIssues++;
             } else {
@@ -1333,17 +1530,17 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
             }
         });
         
-        // Calculate Structural Integrity Index (SII)
-        // Formula: SII = 100 * (1 - (TotalWeightedDebt / (Math.max(ProductionLOC, 1) * 0.05)))
+        // Calculate Architectural Drift (FLIPPED: 0 = perfect, 100 = total drift)
+        // Formula: Drift = (TotalWeightedDebt / (Math.max(ProductionLOC, 1) * 0.05)) * 100
         // This normalizes debt against codebase size with a 5% threshold factor
         const productionLOCSafe = Math.max(productionLOC, 1); // Prevent division by zero
-        const integrityIndex = 100 * (1 - (weightedDebt / (productionLOCSafe * 0.05)));
+        const driftScore = (weightedDebt / (productionLOCSafe * 0.05)) * 100;
         
-        // Clamp result between 0 and 100
-        const integrityIndexClamped = Math.min(100, Math.max(0, integrityIndex));
+        // Clamp result between 0 and 100 (0 = perfect, 100 = total drift)
+        const driftScoreClamped = Math.min(100, Math.max(0, driftScore));
         
         // Round to 1 decimal place for display
-        const integrityIndexRounded = Math.round(integrityIndexClamped * 10) / 10;
+        const driftScoreRounded = Math.round(driftScoreClamped * 10) / 10;
         
         // Calculate Weighted Debt Density for reporting (debt points per 1,000 LOC)
         const weightedDebtDensity = productionLOC > 0 ? (weightedDebt / (productionLOC / 1000)) : 0;
@@ -1356,7 +1553,7 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
         }
         
         return {
-            sii: integrityIndexRounded,
+            driftScore: driftScoreRounded,
             weightedDebt,
             weightedDebtDensity,
             productionLOC,
@@ -1366,3 +1563,58 @@ export function calculateSII(rawIssues: RawIssue[], productionLOC: number, total
     }
 }
 
+/**
+ * Compares drift between base and head results for CI/CD PR analysis
+ * @param baseResult Drift calculation result from base branch/commit
+ * @param headResult Drift calculation result from head branch/commit (PR)
+ * @returns Comparison result with drift change and new violations
+ */
+export interface DriftComparisonResult {
+    driftChange: number; // Change in drift score (head - base)
+    driftChangePercent: number; // Percentage change
+    baseDrift: number;
+    headDrift: number;
+    newViolations: {
+        godClasses: number;
+        nPlusOneQueries: number;
+        layerViolations: number;
+        total: number;
+    };
+    status: 'PASS' | 'FAIL' | 'WARN'; // PASS: < 1%, WARN: 1-5%, FAIL: > 5%
+}
+
+export function compareDrift(baseResult: DriftCalculationResult, headResult: DriftCalculationResult): DriftComparisonResult {
+    const driftChange = headResult.driftScore - baseResult.driftScore;
+    const driftChangePercent = baseResult.driftScore > 0 
+        ? (driftChange / baseResult.driftScore) * 100 
+        : (driftChange > 0 ? 100 : 0); // If base is 0, any increase is 100% change
+    
+    // Determine status based on absolute drift change (not percentage)
+    // PASS: drift increased < 1%, WARN: 1-5%, FAIL: > 5%
+    let status: 'PASS' | 'FAIL' | 'WARN';
+    if (driftChange < 1.0) {
+        status = 'PASS';
+    } else if (driftChange <= 5.0) {
+        status = 'WARN';
+    } else {
+        status = 'FAIL';
+    }
+    
+    // Calculate new violations (simplified: compare issue counts)
+    // In a real implementation, you'd compare specific violations
+    const newViolations = {
+        godClasses: Math.max(0, headResult.productionIssues - baseResult.productionIssues), // Simplified
+        nPlusOneQueries: 0, // Would need detailed comparison
+        layerViolations: 0, // Would need detailed comparison
+        total: Math.max(0, headResult.productionIssues - baseResult.productionIssues)
+    };
+    
+    return {
+        driftChange,
+        driftChangePercent,
+        baseDrift: baseResult.driftScore,
+        headDrift: headResult.driftScore,
+        newViolations,
+        status
+    };
+}

@@ -15,7 +15,8 @@
     ".vscode-test",
     "audit_targets/**/*",
     "results/**/*",
-    "scripts/batch_analyze.ts"
+    "scripts/batch_analyze.ts",
+    "temp/**/*"
   ]
 }
 
