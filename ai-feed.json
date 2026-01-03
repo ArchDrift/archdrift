@@ -1,0 +1,326 @@
+{
+  "project": {
+    "name": "ArchDrift",
+    "previousName": "DriftGuard",
+    "version": "0.1.0",
+    "status": "ship_prep",
+    "type": "vscode_extension",
+    "purpose": "Architectural smell detector for AI-assisted codebases"
+  },
+  "phases": {
+    "P0_Ideation": {
+      "status": "completed",
+      "keyDecisions": [
+        "Name: DriftGuard → ArchDrift",
+        "Scope: Two probes (God Class, N+1 Query)",
+        "Philosophy: Architectural geiger counter",
+        "Zero configuration approach"
+      ],
+      "files": "~58 chats"
+    },
+    "P1_Engine": {
+      "status": "completed",
+      "keyDecisions": [
+        "Tiered God Class thresholds (1501/2501 LOC)",
+        "N+1 weight reduced to 2 points",
+        "Layer violation detection added (10 points)",
+        "Ghost repo used for tuning"
+      ],
+      "files": "~72 chats",
+      "coreFile": "src/analyzer.ts"
+    },
+    "P2_VSCode": {
+      "status": "completed",
+      "keyDecisions": [
+        "Real-time diagnostics on open/save",
+        "Priority-based status bar",
+        "Report generation (SUMMARY + FULL_DETAILS)",
+        "Commands: scanActiveFile, generateReport"
+      ],
+      "files": "~80 chats",
+      "coreFile": "src/extension.ts"
+    },
+    "P3_Cloud": {
+      "status": "planned",
+      "keyDecisions": [
+        "Next.js + Vercel architecture",
+        "Stripe payments ($2 single, $5 bundle)",
+        "PDF generation + Resend email",
+        "Git clone on server"
+      ],
+      "files": "~26 chats",
+      "note": "Deferred - not implemented"
+    },
+    "P4_Validation": {
+      "status": "completed",
+      "keyDecisions": [
+        "42 → 52 repository testing",
+        "Density-based SII formula",
+        "Methodology document created",
+        "Critique response documented"
+      ],
+      "files": "~228 chats",
+      "resultsLocation": "test-results-backup/"
+    },
+    "P5_Ship": {
+      "status": "in_progress",
+      "keyDecisions": [
+        "VSIX package cleanup",
+        "MIT License added",
+        "Name change: DriftGuard → ArchDrift",
+        "Leaderboard redesign (signal-first)"
+      ],
+      "files": "~53 chats",
+      "blockers": ["Marketplace submission pending"]
+    },
+    "P5_5_Chaos": {
+      "status": "recovery",
+      "issue": "Test repos moved to new drive, originals deleted",
+      "impact": "Batch scripts broken, leaderboard can't regenerate",
+      "recovery": "Scripts updated with existence checks, results backed up",
+      "files": "~22 chats",
+      "nextSteps": [
+        "Retest engine on new drive repos",
+        "Fix/regenerate leaderboard",
+        "Validate scripts work without audit_targets/"
+      ]
+    }
+  },
+  "technicalStack": {
+    "core": {
+      "language": "TypeScript",
+      "runtime": "Node.js 16.x",
+      "parser": "Custom AST (lightweight)"
+    },
+    "extension": {
+      "framework": "VS Code Extension API",
+      "build": "TypeScript compiler",
+      "package": "VSIX format"
+    },
+    "analysis": {
+      "godClass": "Line counting with comment filtering",
+      "nPlusOne": "Pattern matching in loops",
+      "layerViolation": "Import parsing + path resolution",
+      "sii": "Density-based with logarithmic floor"
+    },
+    "validation": {
+      "batchScripts": "Node.js automation",
+      "resultFormat": "Markdown files",
+      "storage": "results/batch_X/ structure"
+    },
+    "cloud": {
+      "framework": "Next.js (App Router)",
+      "hosting": "Vercel",
+      "payments": "Stripe",
+      "email": "Resend",
+      "pdf": "PDFKit",
+      "status": "planned_not_implemented"
+    }
+  },
+  "formulas": {
+    "sii": {
+      "name": "Structural Integrity Index",
+      "alsoKnownAs": ["Structural Stability Signal", "Architectural Drift Pressure"],
+      "formula": {
+        "step1": "WeightedViolations = (Monoliths × 5) + (N1 × 2) + (Layer × 10)",
+        "step2": "ViolationDensity = WeightedViolations / TotalProductionFiles",
+        "step3": "BaseScore = 100 - (ViolationDensity × 100)",
+        "step4": "LogarithmicFloor: If Density ≤ 1: 40 + (60 × e^(-Density × 2)), If Density > 1: 40 + (10 × e^(-(Density - 1) × 0.5)) + sqrt decay",
+        "step5": "Final = max(BaseScore, LogarithmicFloor) clamped 0-100"
+      },
+      "weights": {
+        "layerViolation": 10,
+        "godClassMonolith": 5,
+        "nPlusOneQuery": 2
+      },
+      "display": {
+        "format": "No percent sign (91.6 not 91.6%)",
+        "bands": ["Stable", "Mostly Stable", "Moderate Pressure", "Elevated Pressure", "High Pressure", "Very High Pressure", "Critical Pressure"],
+        "noGrades": true
+      }
+    }
+  },
+  "detectionRules": {
+    "godClass": {
+      "thresholds": {
+        "regular": 1501,
+        "typeSchema": 2501
+      },
+      "tiers": {
+        "monolith": "≥1501 LOC (regular) or ≥2501 LOC (type files) = 5 points",
+        "largeClass": "801-1500 LOC = not counted in strict mode"
+      },
+      "detection": "Line counting excluding empty lines and comments"
+    },
+    "nPlusOne": {
+      "loops": ["for", "while", ".forEach()", ".map()", ".filter()", ".reduce()"],
+      "ioPatterns": ["await", "db.*", "prisma.*", ".query()", ".find()", ".findOne()", "fetch()", "axios.*"],
+      "weight": 2,
+      "falsePositiveRate": "High - acknowledged limitation"
+    },
+    "layerViolation": {
+      "layers": {
+        "api": ["/api/", "/presentation/", "/controllers/"],
+        "domain": ["/domain/", "/core/", "/usecases/"],
+        "infra": ["/infra/", "/infrastructure/", "/persistence/", "/adapters/"]
+      },
+      "rules": {
+        "allowed": ["API → Domain", "API → Infra", "Domain → Infra"],
+        "forbidden": ["Domain → API", "Infra → API", "Infra → Domain"]
+      },
+      "weight": 10,
+      "detection": "Path-based layer detection + import parsing"
+    }
+  },
+  "fileStructure": {
+    "core": [
+      "src/analyzer.ts - Main analysis engine",
+      "src/extension.ts - VS Code integration",
+      "src/reportGenerator.ts - Report generation"
+    ],
+    "scripts": [
+      "scripts/batch_analyze*.js - Batch analysis scripts",
+      "scripts/generate_final_leaderboard.js - Old leaderboard",
+      "scripts/generate_structural_landscape.js - New landscape",
+      "scripts/recover_chat_history.js - Chat recovery tool"
+    ],
+    "results": {
+      "location": "test-results-backup/",
+      "structure": "results/batch_X/repo-name/SUMMARY.md + FULL_DETAILS.md"
+    },
+    "documentation": [
+      "README.md - User documentation",
+      "METHODOLOGY.md - Technical specification",
+      "ROADMAP.md - This narrative",
+      "LICENSE - MIT License"
+    ]
+  },
+  "currentIssues": {
+    "critical": [
+      {
+        "issue": "Test repos deleted (moved to new drive)",
+        "impact": "Batch scripts reference missing audit_targets/",
+        "status": "Scripts updated with existence checks",
+        "action": "Retest engine, regenerate leaderboard if needed"
+      }
+    ],
+    "blockers": [
+      {
+        "issue": "Marketplace submission",
+        "status": "Pending",
+        "requirements": ["VSIX package ready", "Publisher account setup", "DMARC configured"]
+      }
+    ],
+    "knownLimitations": [
+      "N+1 detection has high false positive rate",
+      "Layer detection requires standard directory structure",
+      "Production code filter may miss non-standard layouts",
+      "Static analysis only (no runtime patterns)"
+    ]
+  },
+  "nextSteps": {
+    "immediate": [
+      "Retest analyzer.ts on new drive repos",
+      "Validate SII calculations still accurate",
+      "Fix/regenerate leaderboard (if needed)",
+      "Test all scripts work without audit_targets/"
+    ],
+    "shortTerm": [
+      "Marketplace submission",
+      "HN post publication",
+      "Cloud backend implementation (if proceeding)",
+      "User feedback collection"
+    ],
+    "longTerm": [
+      "Configurable layer patterns",
+      "Improved N+1 detection (DataLoader awareness)",
+      "Full AST parsing for Python/Java/Go",
+      "Historical tracking",
+      "ADR/MCP integration"
+    ]
+  },
+  "keyDecisions": {
+    "naming": {
+      "driftguard_to_archdrift": {
+        "when": "P5 Ship Prep",
+        "reason": "Better branding, clearer purpose",
+        "scope": "Global find/replace"
+      }
+    },
+    "architecture": {
+      "read_only_v01": {
+        "decision": "No auto-fixes in v0.1",
+        "reason": "Focus on detection, not correction"
+      },
+      "zero_config": {
+        "decision": "Drop-in installation, no configuration",
+        "reason": "Lower barrier to entry"
+      }
+    },
+    "scoring": {
+      "density_based": {
+        "decision": "Violations per file, not per LOC",
+        "reason": "Large codebases shouldn't be penalized for size"
+      },
+      "logarithmic_floor": {
+        "decision": "Minimum ~40% score even for bad repos",
+        "reason": "Prevents collapse to zero, acknowledges some structure exists"
+      }
+    },
+    "presentation": {
+      "signal_first": {
+        "decision": "No ranks, grades, competitive language",
+        "reason": "Avoids wrong mental model (who's best vs what patterns exist)"
+      },
+      "structural_profiles": {
+        "decision": "Group by architectural patterns, not scores",
+        "reason": "More informative, less judgmental"
+      }
+    }
+  },
+  "testData": {
+    "repositories": {
+      "total": 52,
+      "batches": {
+        "batch_1": 10,
+        "batch_2": 11,
+        "batch_3": 19,
+        "final_push": 10
+      },
+      "location": "test-results-backup/results/",
+      "status": "Backed up, source repos moved/deleted"
+    },
+    "notableResults": {
+      "highScores": ["storybook: 99.6", "angular: 97.7", "svelte: 97.6"],
+      "lowScores": ["directus: 46.6", "nocodb: 73.7"],
+      "interesting": ["prettier: 100% (468 prod files, 5372 total)"]
+    }
+  },
+  "chatHistory": {
+    "totalFiles": 383,
+    "location": "all-cursor-chats/",
+    "index": "all-cursor-chats/INDEX.md",
+    "searchResults": "all-cursor-chats/SEARCH_RESULTS.md",
+    "mostActiveWorkspace": "ebf1d29318bd9e8490b5e970ffca225d (141 chats)"
+  },
+  "contextForAI": {
+    "projectState": "Ship prep phase, recent migration crisis resolved",
+    "workingComponents": ["Core engine", "VSCode extension", "Report generation"],
+    "brokenComponents": ["Batch analysis scripts (need audit_targets/)", "Leaderboard regeneration"],
+    "unknownComponents": ["Engine accuracy on new drive (needs retest)"],
+    "continuationStrategy": "Use ROADMAP.md for full context, this JSON for structured data",
+    "criticalFiles": [
+      "ROADMAP.md - Complete narrative",
+      "METHODOLOGY.md - Technical specification",
+      "src/analyzer.ts - Core engine",
+      "src/extension.ts - Extension entry",
+      "scripts/generate_structural_landscape.js - New leaderboard"
+    ]
+  },
+  "metadata": {
+    "reconstructed": "2026-01-03",
+    "source": "383 Cursor chat files",
+    "version": "1.0",
+    "purpose": "AI continuation feed for ArchDrift project"
+  }
+}

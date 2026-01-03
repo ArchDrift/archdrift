@@ -1,0 +1,18 @@
+out
+node_modules
+.vscode-test/
+*.vsix
+
+# Audit targets and benchmarks
+audit_targets/
+benchmarks/
+
+
+
+
+
+
+
+
+
+

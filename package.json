@@ -1,0 +1,50 @@
+{
+  "name": "archdrift",
+  "displayName": "ArchDrift",
+  "description": "A lightweight code smell detector for God Classes, N+1 queries, and layer integrity violations",
+  "version": "0.1.0",
+  "publisher": "archdrift",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prajeesh/archdrift.git"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "archdrift.scanActiveFile",
+        "title": "ArchDrift: Scan Active File"
+      },
+      {
+        "command": "archdrift.generateReport",
+        "title": "ArchDrift: Generate Workspace Report"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node ./out/test/runTests.js",
+    "package": "npx @vscode/vsce package --no-yarn"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.0",
+    "@types/node": "16.x",
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^2.32.0",
+    "glob": "^10.3.0",
+    "mocha": "^10.2.0",
+    "sqlite3": "^5.1.7",
+    "typescript": "^4.9.4"
+  }
+}
