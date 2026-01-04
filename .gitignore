@@ -54,6 +54,9 @@ scripts/verify_repo_integrity.js
 
 # Note: ROADMAP.md is public and should be committed
 
+# Internal development tools (not for public)
+internal/
+
 # Temporary files
 temp/
 *.log

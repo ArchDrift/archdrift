@@ -10,7 +10,7 @@ Architectural drift creeps into codebases silently. What starts as a "quick fix"
 
 **Real-world impact:**
 - **Storybook** (1,879 files, 166K LOC): **0.4% drift** → Rock solid architecture, minimal technical debt
-- **Lodash** (13 files, 26K LOC): **38.5% drift** → Critical refactoring needed, high maintenance burden
+- **Lodash** (13 files, 26K LOC): **13.8% drift** → Eroding architecture, manageable with domain-aware analysis
 
 The difference? Early detection and prevention.
 
@@ -143,9 +143,15 @@ ArchDrift has analyzed **43+ open-source repositories** to validate its methodol
 | **Storybook** | 1,879 | 166K | **0.4%** | 🟢 Rock Solid |
 | **Angular** | 2,720 | 255K | **2.1%** | 🟡 Stable |
 | **Prisma** | 881 | 58K | **13.4%** | 🟠 Eroding |
-| **Lodash** | 13 | 26K | **38.5%** | 🔴 Critical |
+| **Lodash** | 13 | 26K | **13.8%** | 🟠 Eroding |
 
 **Key Insight**: Repository size doesn't determine drift. Architecture discipline does.
+
+### 🧠 Domain-Aware Weighting (v0.2)
+
+ArchDrift v0.2 features **Domain-Aware Weighting**. By recognizing Lodash as a UTILITY library, our engine provides a nuanced 13.8% score, avoiding the false-positive "Critical" alerts triggered by standard complexity scanners.
+
+**How it works**: ArchDrift automatically detects project domains (FRAMEWORK, UTILITY, DATABASE, APPLICATION) and applies tailored violation weights. Utility libraries like Lodash are expected to have higher file complexity, so God Class violations are weighted appropriately—resulting in accurate, actionable drift scores.
 
 ## Supported File Types
 
