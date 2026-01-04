@@ -26,6 +26,32 @@ CHAT_TIMELINE_ANALYSIS.md
 FILE_LOCATIONS.md
 STRUCTURAL_LANDSCAPE.md
 METHODOLOGY.md
+
+# Personal development docs and Cursor rules
+.cursor/
+
+# Chat history recovery scripts (personal development tools)
+scripts/analyze_chat_timeline.js
+scripts/generate_structural_landscape.js
+scripts/recover_chat_history.js
+scripts/search_recovered_chats.js
+
+# Personal development scripts (batch analysis, cloning, verification)
+scripts/analyze_all_batches.js
+scripts/analyze_missing.js
+scripts/batch_analyze.*
+scripts/check_clone_status.ps1
+scripts/check_express_files.js
+scripts/clone_*.ps1
+scripts/clone_*.sh
+scripts/final_integrity_report.js
+scripts/generate_final_leaderboard.js
+scripts/reanalyze_ghost.js
+scripts/rerun_zod_express.js
+scripts/run_complete_audit.ps1
+scripts/verify_directus_violations.js
+scripts/verify_repo_integrity.js
+
 # Note: ROADMAP.md is public and should be committed
 
 # Temporary files
