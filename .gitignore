@@ -64,11 +64,6 @@ temp/
 # Extension-generated audit reports (old naming)
 .driftguard/
 
-# Dashboard build artifacts
-dashboard/.next/
-dashboard/out/
-dashboard/node_modules/
-
 
 
 

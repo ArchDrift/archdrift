@@ -31,7 +31,7 @@ export const STABILITY_LABELS = {
         threshold: Infinity,
         emoji: '🔴',
         name: 'Critical',
-        description: 'High drift, urgent refactoring needed'
+        description: 'High drift, architectural stress signals detected'
     }
 } as const;
 
@@ -58,8 +58,8 @@ export function getStabilityLabel(drift: number): typeof STABILITY_LABELS[keyof 
 export const EXPERT_DIAGNOSIS_TEMPLATES = {
     ROCK_SOLID: (topOffenders?: string[], remediation?: string) => {
         const base = topOffenders && topOffenders.length > 0
-            ? `🟢 Rock Solid: Minimal architectural drift, excellent structural integrity. Top files: ${topOffenders.slice(0, 3).join(', ')}`
-            : '🟢 Rock Solid: Minimal architectural drift, excellent structural integrity.';
+            ? `🟢 Rock Solid: Minimal architectural drift, strong structural integrity. Top files: ${topOffenders.slice(0, 3).join(', ')}`
+            : '🟢 Rock Solid: Minimal architectural drift, strong structural integrity.';
         return remediation ? `${base} ${remediation}` : base;
     },
     STABLE: (topOffenders?: string[], remediation?: string) => {
@@ -70,14 +70,26 @@ export const EXPERT_DIAGNOSIS_TEMPLATES = {
     },
     ERODING: (topOffenders?: string[], remediation?: string) => {
         const base = topOffenders && topOffenders.length > 0
-            ? `🟠 Eroding: Moderate drift, requires attention. Priority refactoring: ${topOffenders.slice(0, 3).join(', ')}`
-            : '🟠 Eroding: Moderate drift, requires attention.';
+            ? `🟠 Eroding: Moderate drift, architectural pressure accumulating. Focus areas: ${topOffenders.slice(0, 3).join(', ')}`
+            : '🟠 Eroding: Moderate drift, architectural pressure accumulating.';
         return remediation ? `${base} ${remediation}` : base;
     },
-    CRITICAL: (topOffenders?: string[], remediation?: string) => {
+    CRITICAL: (topOffenders?: string[], remediation?: string, drift?: number, violations?: { layer: number; nPlusOne: number; godClass: number }) => {
+        // Determine if stress is "significant" or localized
+        const isSignificantStress = (drift && drift > 30) || 
+            (violations && (
+                violations.nPlusOne > 20 || // Clustered N+1s indicate systemic issue
+                violations.layer > 5 || // Multiple layer violations indicate systemic issue
+                (violations.layer + violations.nPlusOne + violations.godClass) > 30 // High total violation count
+            ));
+        
+        const stressPhrase = isSignificantStress 
+            ? 'significant architectural stress detected'
+            : 'architectural stress signals detected';
+        
         const base = topOffenders && topOffenders.length > 0
-            ? `🔴 Critical: High drift, urgent refactoring needed. Critical files: ${topOffenders.slice(0, 3).join(', ')}`
-            : '🔴 Critical: High drift, urgent refactoring needed.';
+            ? `🔴 Critical: High drift, ${stressPhrase}. Focus areas: ${topOffenders.slice(0, 3).join(', ')}`
+            : `🔴 Critical: High drift, ${stressPhrase}.`;
         return remediation ? `${base} ${remediation}` : base;
     }
 } as const;
@@ -85,7 +97,7 @@ export const EXPERT_DIAGNOSIS_TEMPLATES = {
 /**
  * Detect project domain from repository name and characteristics
  * @param repoName Repository name
- * @param violations Violation counts (can help infer domain)
+ * @param violations Violation counts (used for fallback detection when name doesn't match)
  * @returns Detected project domain
  */
 export function detectProjectDomain(
@@ -125,6 +137,42 @@ export function detectProjectDomain(
         return 'APPLICATION';
     }
     
+    // Violation-pattern-based fallback detection (when name doesn't match any pattern)
+    if (violations) {
+        const { layer, nPlusOne, godClass } = violations;
+        const totalViolations = layer + nPlusOne + godClass;
+        
+        // Handle clean repos (no violations detected)
+        if (totalViolations === 0) {
+            return 'UTILITY';  // Clean repos are typically small tools, utilities, or well-architected libraries
+        }
+        
+        // Calculate violation ratios
+        const n1Ratio = nPlusOne / totalViolations;
+        const layerRatio = layer / totalViolations;
+        const godClassRatio = godClass / totalViolations;
+        
+        // DATABASE: High N+1 query ratio (>40%) indicates database/ORM project
+        if (n1Ratio > 0.4) {
+            return 'DATABASE';
+        }
+        
+        // FRAMEWORK: High layer violation ratio (>30%) indicates architectural framework
+        if (layerRatio > 0.3) {
+            return 'FRAMEWORK';
+        }
+        
+        // UTILITY: High God Class ratio (>50%) with low N+1 suggests utility library
+        if (godClassRatio > 0.5 && n1Ratio < 0.2) {
+            return 'UTILITY';
+        }
+        
+        // APPLICATION: Mixed violations or balanced pattern suggests full-stack application
+        // Default to APPLICATION if we have violations but no clear pattern
+        return 'APPLICATION';
+    }
+    
+    // If no violations data or all checks fail, return UNKNOWN
     return 'UNKNOWN';
 }
 
@@ -182,7 +230,7 @@ export function getExpertDiagnosis(
         case 'Eroding':
             return EXPERT_DIAGNOSIS_TEMPLATES.ERODING(offenderFiles.length > 0 ? offenderFiles : undefined, remediation);
         case 'Critical':
-            return EXPERT_DIAGNOSIS_TEMPLATES.CRITICAL(offenderFiles.length > 0 ? offenderFiles : undefined, remediation);
+            return EXPERT_DIAGNOSIS_TEMPLATES.CRITICAL(offenderFiles.length > 0 ? offenderFiles : undefined, remediation, drift, violations);
         default:
             return EXPERT_DIAGNOSIS_TEMPLATES.ROCK_SOLID(undefined, remediation);
     }
@@ -250,7 +298,7 @@ export const DOMAIN_WEIGHTS = {
  * Remediation messages based on top violation type
  */
 export const REMEDIATION_TEMPLATES = {
-    layerViolation: 'Remediation: Refactor imports to respect layer boundaries—move shared logic to appropriate layers.',
-    godClass: 'Remediation: Split large files into focused modules—extract related functionality into separate files.',
-    nPlusOneQuery: 'Remediation: Batch database queries outside loops—use Promise.all() or bulk operations to reduce round trips.'
+    layerViolation: 'Consider refactoring imports to respect layer boundaries—move shared logic to appropriate layers to reduce architectural stress.',
+    godClass: 'Consider splitting large files into focused modules—extract related functionality into separate files to reduce complexity pressure.',
+    nPlusOneQuery: 'Consider batching database queries outside loops—use Promise.all() or bulk operations to reduce round trips and performance pressure.'
 } as const;

@@ -1175,7 +1175,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
         if (codeLineCount >= monolithThreshold) {
             tier = 'Monolith';
             const fileType = isTypeDefinitionFile ? 'type/schema definition' : '';
-            tierMessage = `Monolith detected (${codeLineCount} code lines${fileType ? ` in ${fileType} file` : ''}). Critical complexity - urgent refactoring required.`;
+            tierMessage = `Monolith detected (${codeLineCount} code lines${fileType ? ` in ${fileType} file` : ''}). Consider splitting into smaller modules to reduce complexity pressure.`;
         } else {
             tier = 'Large Class';
             tierMessage = `Large Class detected (${codeLineCount} code lines). Consider splitting into smaller modules.`;
@@ -1251,7 +1251,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
             pattern: 'Layer Violation',
             line: violation.line,
             column: violation.column,
-            message: `${violation.sourceLayer} module importing from ${violation.targetLayer} ("${violation.importText}"). According to ArchDrift's default rules, ${violation.sourceLayer} must not depend on ${violation.targetLayer}.`,
+            message: `${violation.sourceLayer} module importing from ${violation.targetLayer} ("${violation.importText}"). This creates architectural coupling between layers. Consider refactoring to respect layer boundaries.`,
             severity: DiagnosticSeverity.Error,
             codeSnippet: codeSnippet,
             importText: violation.importText,
@@ -1440,27 +1440,11 @@ export function calculateDrift(rawIssues: RawIssue[], productionLOC: number, tot
         const violationDensity = weightedViolations / totalFiles;
         
         // Logarithmic Ceiling: Cap maximum drift for extremely problematic codebases
-        // For violationDensity <= 1: Use standard ceiling
-        // For violationDensity > 1: Use a more forgiving formula that caps maximum around 60-70%
-        let logarithmicCeiling: number;
-        if (violationDensity <= 1) {
-            // Standard logarithmic ceiling for normal cases
-            // Formula: ceiling = 100 - (60 * e^(-violationDensity * 2))
-            // This caps maximum drift at ~100% for extremely bad repos
-            logarithmicCeiling = 100 - (60 * Math.exp(-violationDensity * 2));
-            driftScore = Math.min(driftScore, logarithmicCeiling);
-        } else {
-            // For high violation densities, use a more forgiving formula
-            // Cap the maximum drift around 60-70% even for very high densities
-            // Formula: ceiling = 100 - (40 * e^(-(violationDensity - 1) * 0.5))
-            // This ensures maximum of ~60-70% for extremely bad repos
-            logarithmicCeiling = 100 - (40 * Math.exp(-(violationDensity - 1) * 0.5));
-            
-            // For high densities, use a square root growth instead of linear
-            // This prevents drift scores from exploding too quickly
-            const growthFactor = Math.sqrt(violationDensity);
-            driftScore = Math.min(logarithmicCeiling, growthFactor * 50);
-        }
+        // MONOTONIC GUARANTEE: ceiling(density) is strictly non-decreasing - higher density never results in lower ceiling
+        // Formula: ceiling = 100 - (60 * e^(-violationDensity * 1.5))
+        // This ensures: (1) early saturation for low densities, (2) smooth asymptotic approach to 100, (3) monotonicity
+        const logarithmicCeiling = 100 - (60 * Math.exp(-violationDensity * 1.5));
+        driftScore = Math.min(driftScore, logarithmicCeiling);
         
         // Clamp result between 0 and 100 (0 = perfect, 100 = total drift)
         const driftScoreClamped = Math.min(100, Math.max(0, driftScore));

@@ -2,11 +2,72 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { analyzeDocument, isSupportedFile, AnalysisResult, LayerViolation, countCodeLines, calculateDrift, isProductionCode, RawIssue, VIOLATION_WEIGHTS } from './analyzer';
-import { generateWorkspaceReport, writeReportToOutputChannel, generateMarkdownReport } from './reportGenerator';
+import { detectProjectDomain, ProjectDomain } from './config/constants';
 
 let diagnosticCollection: vscode.DiagnosticCollection;
 let statusBarItem: vscode.StatusBarItem;
 let outputChannel: vscode.OutputChannel;
+
+/**
+ * Gets a workspace-relative path for use in markdown links.
+ * Ensures the path is portable (no absolute paths, drive letters, or user directories).
+ * 
+ * @param uri - VS Code URI of the file
+ * @param workspaceRoot - Workspace root path (for fallback calculation)
+ * @returns Workspace-relative path with forward slashes (e.g., "src/analyzer.ts")
+ */
+function getWorkspaceRelativePath(uri: vscode.Uri, workspaceRoot: string): string {
+    let relativePath: string;
+    
+    try {
+        // First try VS Code's built-in method (most reliable)
+        relativePath = vscode.workspace.asRelativePath(uri, false);
+    } catch {
+        // Fallback: use path.relative
+        relativePath = path.relative(workspaceRoot, uri.fsPath);
+    }
+    
+    // Check for absolute path BEFORE normalization (path.isAbsolute works with native separators)
+    const isAbsoluteBeforeNormalization = path.isAbsolute(relativePath);
+    
+    // Normalize to forward slashes for cross-platform compatibility
+    relativePath = relativePath.split(path.sep).join('/');
+    
+    // CRITICAL: Ensure we never return an absolute path
+    // If path.relative returns an absolute path (e.g., different drives on Windows),
+    // or if the path contains drive letters, we need to handle it
+    if (isAbsoluteBeforeNormalization || relativePath.match(/^[A-Za-z]:/)) {
+        // If we got an absolute path, try to extract just the workspace-relative portion
+        // This handles edge cases like files on different drives
+        const workspaceRelative = path.relative(workspaceRoot, uri.fsPath);
+        if (!path.isAbsolute(workspaceRelative) && !workspaceRelative.match(/^[A-Za-z]:/)) {
+            relativePath = workspaceRelative.split(path.sep).join('/');
+        } else {
+            // Last resort: use just the filename
+            relativePath = path.basename(uri.fsPath);
+        }
+    }
+    
+    // Remove any leading "./" or "../" that might indicate relative navigation
+    // We want clean paths like "src/file.ts", not "./src/file.ts" or "../src/file.ts"
+    relativePath = relativePath.replace(/^\.\//, '').replace(/^\.\.\//, '');
+    
+    // Final safety check: ensure no drive letters, absolute path markers, or user directories remain
+    // Check for patterns that indicate absolute paths (Windows drive letters, Unix root paths)
+    // Note: Leading "/" without "./" prefix indicates Unix absolute path
+    if (relativePath.match(/^[A-Za-z]:/) || (relativePath.startsWith('/') && !relativePath.startsWith('./'))) {
+        // Still has absolute path markers - use basename as last resort
+        relativePath = path.basename(uri.fsPath);
+    }
+    
+    // Remove leading slash if present (for better portability in markdown)
+    // Workspace-relative paths should not start with "/"
+    if (relativePath.startsWith('/')) {
+        relativePath = relativePath.substring(1);
+    }
+    
+    return relativePath;
+}
 
 export function activate(context: vscode.ExtensionContext) {
     // Create output channel for debugging
@@ -271,8 +332,29 @@ export function activate(context: vscode.ExtensionContext) {
                 .sort((a, b) => b[1].count - a[1].count)
                 .slice(0, 5);
 
-            // Get top pattern (most issues)
-            const sortedPatterns = Array.from(patternCounts.entries())
+            // Get production-only pattern counts for breakdown table and expert diagnosis
+            const productionPatternCounts = new Map<string, { count: number; severity: vscode.DiagnosticSeverity }>();
+            allDiagnostics.forEach(({ uri, diagnostic }) => {
+                if (isProductionCode(uri.fsPath, workspaceRoot)) {
+                    const patternMatch = diagnostic.message.match(/^\[([^\]]+)\]/);
+                    const pattern = patternMatch ? patternMatch[1] : 'Unknown';
+                    const existing = productionPatternCounts.get(pattern);
+                    if (existing) {
+                        existing.count++;
+                        if (diagnostic.severity < existing.severity) {
+                            existing.severity = diagnostic.severity;
+                        }
+                    } else {
+                        productionPatternCounts.set(pattern, {
+                            count: 1,
+                            severity: diagnostic.severity
+                        });
+                    }
+                }
+            });
+
+            // Get top pattern (most issues) - use production only
+            const sortedPatterns = Array.from(productionPatternCounts.entries())
                 .sort((a, b) => b[1].count - a[1].count);
             const topPattern = sortedPatterns.length > 0 ? sortedPatterns[0][0] : null;
 
@@ -302,102 +384,78 @@ export function activate(context: vscode.ExtensionContext) {
             const emptySlots = 10 - filledSlots;
             const driftBar = '█'.repeat(filledSlots) + '░'.repeat(emptySlots);
 
-            // Generate markdown report - CI/CD Gatekeeper format
+            // Generate markdown report - Launch-aligned format
             const workspaceName = workspaceFolder.name;
-            let markdown = `# 🛡️ ArchDrift Architectural Drift Analysis\n\n`;
+            
+            // Detect project domain
+            const detectedDomain: ProjectDomain = detectProjectDomain(workspaceName, {
+                layer: Array.from(productionPatternCounts.entries()).find(([p]) => p === 'Layer Violation')?.[1]?.count || 0,
+                nPlusOne: Array.from(productionPatternCounts.entries()).find(([p]) => p === 'N+1 Query')?.[1]?.count || 0,
+                godClass: Array.from(productionPatternCounts.entries()).find(([p]) => p === 'God Class')?.[1]?.count || 0
+            });
+            let markdown = `# ArchDrift Architectural Drift Analysis\n\n`;
             markdown += `**Workspace:** ${workspaceName}\n\n`;
             markdown += `---\n\n`;
             
-            // CI/CD Gatekeeper Header - Architectural Drift (0% = perfect, 100% = total drift)
-            markdown += `## Architectural Drift: **${driftScoreRounded}%**\n\n`;
+            // Architectural Drift (Snapshot) - Launch-aligned header
+            markdown += `## Architectural Drift (Snapshot): **${driftScoreRounded}%**\n\n`;
             markdown += `[${driftBar}]\n\n`;
+            markdown += `Point-in-time estimate of architectural risk based on structural signals in production code.\nMost useful when evaluated across multiple scans.\n\n`;
+            markdown += `Architectural drift becomes meaningful when tracked over time.\n\n`;
+            markdown += `---\n\n`;
             
-            // Expert Diagnosis Section
-            let hotspot = 'Unknown';
-            let threatPattern = 'Unknown';
-            let riskFactor = 'Unknown';
+            // Detected Domain Section
+            markdown += `**Detected Domain:** ${detectedDomain}\n\n`;
+            markdown += `Scoring emphasizes architectural risks most relevant to this type of project.\n\n`;
+            markdown += `---\n\n`;
             
-            // Handle perfect score (0% drift) - show "Perfect Architecture" message
-            if (driftScoreRounded <= 0 && allDiagnostics.length === 0) {
-                hotspot = 'N/A';
-                threatPattern = 'Perfect Architecture';
-                riskFactor = 'No violations detected';
-            } else if (topOffenders.length > 0) {
-                // Find most frequent directory in Top 5 Offenders
-                const directoryCounts = new Map<string, number>();
-                topOffenders.forEach(([filePath, data]) => {
-                    let relativePath: string;
-                    try {
-                        relativePath = vscode.workspace.asRelativePath(data.uri, false);
-                    } catch {
-                        relativePath = path.basename(data.uri.fsPath);
-                    }
-                    const dirPath = path.dirname(relativePath).replace(/\\/g, '/');
-                    const count = directoryCounts.get(dirPath) || 0;
-                    directoryCounts.set(dirPath, count + data.count);
-                });
-                
-                const sortedDirs = Array.from(directoryCounts.entries())
-                    .sort((a, b) => b[1] - a[1]);
-                hotspot = sortedDirs.length > 0 ? sortedDirs[0][0] : 'Unknown';
-            }
+            // Check if there are any production violations
+            const hasProductionViolations = productionIssues > 0;
+            const productionDiagnosticsCount = allDiagnostics.filter(({ uri }) => isProductionCode(uri.fsPath, workspaceRoot)).length;
+            const hasTestViolations = allDiagnostics.length > productionDiagnosticsCount;
             
-            // Find violation pattern with highest weighted impact
-            if (sortedPatterns.length > 0) {
-                const patternWeights = new Map<string, number>();
-                sortedPatterns.forEach(([pattern, data]) => {
-                    let weight = 0;
-                    if (pattern === 'Layer Violation') {
-                        weight = data.count * VIOLATION_WEIGHTS.layerViolation;
-                    } else if (pattern === 'N+1 Query') {
-                        weight = data.count * VIOLATION_WEIGHTS.nPlusOneQuery;
-                    } else if (pattern === 'God Class') {
-                        weight = data.count * VIOLATION_WEIGHTS.godClassMonolith;
-                    }
-                    patternWeights.set(pattern, weight);
-                });
-                
-                const sortedByWeight = Array.from(patternWeights.entries())
-                    .sort((a, b) => b[1] - a[1]);
-                threatPattern = sortedByWeight.length > 0 ? sortedByWeight[0][0] : 'Unknown';
-                
-                // Map pattern to risk factor
-                if (threatPattern === 'Layer Violation') {
-                    riskFactor = 'Logic Boundaries';
-                } else if (threatPattern === 'N+1 Query') {
-                    riskFactor = 'Performance Scalability';
-                } else if (threatPattern === 'God Class') {
-                    riskFactor = 'Maintenance Velocity';
+            // Primary Drift Contributors Section (replaces Expert Diagnosis)
+            markdown += `### Primary Drift Contributors\n\n`;
+            
+            if (driftScoreRounded <= 0 && !hasProductionViolations) {
+                // Zero-violation messaging (Snapshot, Not "Perfect")
+                markdown += `**No Architectural Risk Signals Detected (Snapshot)**\n\n`;
+                markdown += `No architectural violations were found in production code at this point in time.\n\n`;
+                if (hasTestViolations) {
+                    markdown += `*Note: ${allDiagnostics.length - productionDiagnosticsCount} violation${allDiagnostics.length - productionDiagnosticsCount > 1 ? 's' : ''} found in test files (excluded from drift calculation)*\n\n`;
                 }
-            }
-            
-            markdown += `### 🧠 Expert Diagnosis\n\n`;
-            if (driftScoreRounded <= 0 && allDiagnostics.length === 0) {
-                markdown += `✅ **Perfect Architecture** - No violations detected. The codebase maintains structural integrity with zero architectural drift.\n\n`;
             } else {
-                markdown += `The primary source of architectural drift is located in the **${hotspot}**. `;
-                markdown += `Systemic **${threatPattern}** violations indicate that the system's **${riskFactor}** is beginning to compromise its structural integrity.\n\n`;
+                // List the three dimensions without presenting them as exact sub-scores
+                markdown += `**Structural Drift**\n`;
+                markdown += `Risk signals from layer violations and architectural coupling patterns\n\n`;
+                markdown += `**Performance Drift**\n`;
+                markdown += `Risk signals from N+1 queries and data-access patterns\n\n`;
+                markdown += `**Complexity Drift**\n`;
+                markdown += `Risk signals from large files and monolithic structures\n\n`;
             }
+            markdown += `---\n\n`;
+            
+            // Baseline & Pro Prompt Section (before Top Offenders)
+            markdown += `### Track Changes Over Time\n\n`;
+            // TODO: Implement Pro user check and baseline logic
+            // For now, show placeholder message
+            markdown += `No baseline has been set for this workspace.\n\n`;
+            markdown += `Set a baseline to begin monitoring whether architectural risk\n`;
+            markdown += `is increasing or decreasing as the codebase evolves.\n\n`;
             markdown += `---\n\n`;
 
             // Top Offenders
             markdown += `## Top Offenders\n\n`;
             if (topOffenders.length > 0) {
                 topOffenders.forEach(([filePath, data], index) => {
-                    // Get relative path from project root (relative to workspace root)
-                    let relativePath: string;
-                    try {
-                        relativePath = vscode.workspace.asRelativePath(data.uri, false);
-                    } catch {
-                        // Fallback: use path.relative from workspace root
-                        relativePath = path.relative(workspaceRoot, data.uri.fsPath);
-                    }
+                    // Get workspace-relative path (portable, no absolute paths)
+                    const relativePath = getWorkspaceRelativePath(data.uri, workspaceRoot);
                     
-                    // Normalize to forward slashes for all links (Markdown/Cursor compatibility)
-                    const normalizedPath = relativePath.split(path.sep).join('/');
+                    // Use workspace-relative path for VS Code-compatible links (works across machines/OS)
+                    const lineNumber = data.firstLine > 0 ? `#L${data.firstLine}` : '';
+                    const linkPath = `${relativePath}${lineNumber}`;
                     
-                    // Create clickable link with relative path from project root
-                    markdown += `${index + 1}. [${normalizedPath}](${normalizedPath}) - ${data.count} issue${data.count > 1 ? 's' : ''}\n`;
+                    markdown += `${index + 1}. [${relativePath}${lineNumber ? `:${data.firstLine}` : ''}](${linkPath}) - ${data.count} issue${data.count > 1 ? 's' : ''}\n`;
                 });
             } else {
                 markdown += `No offenders found.\n`;
@@ -405,46 +463,60 @@ export function activate(context: vscode.ExtensionContext) {
 
             markdown += `\n---\n\n`;
 
-            // Pattern Breakdown Table
+            // Pattern Breakdown Table (qualitative contribution, not severity)
             markdown += `## Pattern Breakdown\n\n`;
-            markdown += `| Pattern | Count | Severity |\n`;
-            markdown += `|---------|-------|----------|\n`;
+            markdown += `| Pattern | Count | Contribution |\n`;
+            markdown += `|---------|-------|--------------|\n`;
             
             if (sortedPatterns.length > 0) {
+                // Determine contribution level based on count relative to total
+                const totalViolations = sortedPatterns.reduce((sum, [, data]) => sum + data.count, 0);
                 sortedPatterns.forEach(([pattern, data]) => {
-                    const patternEmoji = getPatternEmoji(pattern);
-                    const severityIndicator = getPatternSeverityEmoji(pattern);
-                    markdown += `| ${patternEmoji} ${pattern} | ${data.count} | ${severityIndicator} |\n`;
+                    // Determine contribution: Primary (>50%), Significant (20-50%), Minor (<20%)
+                    const contributionPercent = totalViolations > 0 ? (data.count / totalViolations) * 100 : 0;
+                    let contribution: string;
+                    if (contributionPercent > 50) {
+                        contribution = 'Primary';
+                    } else if (contributionPercent >= 20) {
+                        contribution = 'Significant';
+                    } else {
+                        contribution = 'Minor';
+                    }
+                    markdown += `| ${pattern} | ${data.count} | ${contribution} |\n`;
                 });
             } else {
-                markdown += `| *No issues detected* | 0 | 🟢 Low |\n`;
+                markdown += `| *No issues detected* | 0 | None |\n`;
+            }
+            
+            // Show test violations count if any exist
+            if (hasTestViolations) {
+                const testPatternCounts = new Map<string, number>();
+                allDiagnostics.forEach(({ uri, diagnostic }) => {
+                    if (!isProductionCode(uri.fsPath, workspaceRoot)) {
+                        const patternMatch = diagnostic.message.match(/^\[([^\]]+)\]/);
+                        const pattern = patternMatch ? patternMatch[1] : 'Unknown';
+                        testPatternCounts.set(pattern, (testPatternCounts.get(pattern) || 0) + 1);
+                    }
+                });
+                if (testPatternCounts.size > 0) {
+                    markdown += `\n*Note: ${Array.from(testPatternCounts.values()).reduce((a, b) => a + b, 0)} violation${Array.from(testPatternCounts.values()).reduce((a, b) => a + b, 0) > 1 ? 's' : ''} found in test files (excluded from drift calculation)*\n`;
+                }
             }
 
             markdown += `\n---\n\n`;
-            markdown += `Generated by ArchDrift v0.4\n`;
+            markdown += `**About this score:**\n`;
+            markdown += `Drift highlights architectural risk signals that affect long-term maintainability and velocity.\n\n`;
+            markdown += `Generated by ArchDrift v1.0\n`;
 
             // Generate FULL_DETAILS.md with line-by-line breakdown
             let fullDetailsMarkdown = `# 📋 ArchDrift Full Details\n\n`;
             fullDetailsMarkdown += `**Generated:** ${new Date().toLocaleString()}\n\n`;
-            fullDetailsMarkdown += `This document contains a line-by-line breakdown of every violation detected.\n\n`;
-            fullDetailsMarkdown += `---\n\n`;
-            
-            // Add Weighted Debt math explanation to full details only
-            fullDetailsMarkdown += `## Weighted Debt Calculation\n\n`;
-            fullDetailsMarkdown += `**Weighted Debt Density:** ${weightedDebtDensity.toFixed(2)} debt points per 1,000 lines of production code\n\n`;
-            fullDetailsMarkdown += `**Severity Multipliers:**\n`;
-            fullDetailsMarkdown += `- Layer Violations: ×${VIOLATION_WEIGHTS.layerViolation} (Fatal structural drift)\n`;
-            fullDetailsMarkdown += `- N+1 Queries: ×${VIOLATION_WEIGHTS.nPlusOneQuery} (Core efficiency drift)\n`;
-            fullDetailsMarkdown += `- God Class Monoliths: ×${VIOLATION_WEIGHTS.godClassMonolith} (Complexity drift)\n\n`;
-            fullDetailsMarkdown += `**Production Code:** ${productionIssues} violations (${weightedDebt} weighted debt) in ${totalProductionLOC.toLocaleString()} LOC\n\n`;
-            fullDetailsMarkdown += `**Total Violations (including tests):** ${allDiagnostics.length}\n\n`;
-            
-            // Show test file violations count
-            const testFileViolations = allDiagnostics.filter(({ uri }) => !isProductionCode(uri.fsPath, workspaceRoot)).length;
-            if (testFileViolations > 0) {
-                fullDetailsMarkdown += `**Test File Violations:** ${testFileViolations} (excluded from score calculation)\n\n`;
-            }
-            
+            fullDetailsMarkdown += `## Detected Architectural Risk Signals\n\n`;
+            fullDetailsMarkdown += `The following findings list architectural risk signals detected\n`;
+            fullDetailsMarkdown += `in production code during this scan.\n\n`;
+            fullDetailsMarkdown += `Each signal is anchored to a specific file and line number.\n`;
+            fullDetailsMarkdown += `These signals contribute to the overall architectural drift snapshot\n`;
+            fullDetailsMarkdown += `shown in the workspace summary.\n\n`;
             fullDetailsMarkdown += `---\n\n`;
 
             // Group diagnostics by pattern, then by file, and separate production from test
@@ -496,28 +568,23 @@ export function activate(context: vscode.ExtensionContext) {
             const patternOrder = ['God Class', 'N+1 Query', 'Layer Violation'];
             
             // Show production violations grouped by pattern
-            let hasProductionViolations = false;
+            let hasProductionViolationsInDetails = false;
             patternOrder.forEach(pattern => {
                 if (productionViolationsByPattern.has(pattern)) {
-                    hasProductionViolations = true;
+                    hasProductionViolationsInDetails = true;
                     const patternEmoji = getPatternEmoji(pattern);
-                    fullDetailsMarkdown += `## ${patternEmoji} ${pattern}\n\n`;
+                    fullDetailsMarkdown += `---\n\n## ${patternEmoji} ${pattern}\n\n`;
                     
                     const fileMap = productionViolationsByPattern.get(pattern)!;
                     const sortedFiles = Array.from(fileMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                     
                     sortedFiles.forEach(([filePath, violations]) => {
-                        // Get relative path for display (normalized to forward slashes)
-                        let relativePath: string;
-                        try {
-                            relativePath = vscode.workspace.asRelativePath(violations[0].uri, false);
-                        } catch {
-                            relativePath = path.relative(workspaceRoot, filePath);
-                        }
-                        // Normalize to forward slashes for consistency
-                        relativePath = relativePath.split(path.sep).join('/');
+                        // Get workspace-relative path (portable, no absolute paths)
+                        const relativePath = getWorkspaceRelativePath(violations[0].uri, workspaceRoot);
                         
-                        fullDetailsMarkdown += `### \`${relativePath}\`\n\n`;
+                        // Use workspace-relative path for VS Code-compatible links (works across machines/OS)
+                        const linkPath = relativePath;
+                        fullDetailsMarkdown += `### [\`${relativePath}\`](${linkPath})\n\n`;
                         
                         // Sort violations by line number
                         violations.sort((a, b) => a.line - b.line);
@@ -526,6 +593,11 @@ export function activate(context: vscode.ExtensionContext) {
                             // Extract message without [Pattern] prefix
                             const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
                             
+                            // Detect file-level violations (God Class spans entire file)
+                            const isFileLevel = diagnostic.range.end.line - diagnostic.range.start.line > 10 || 
+                                               pattern === 'God Class';
+                            const lineLabel = isFileLevel ? 'File-level' : `Line ${line}`;
+                            
                             // Find corresponding raw issue for code snippet (CI/CD evidence)
                             const rawIssue = allRawIssues.find(issue => {
                                 const issueFilePath = (issue as any).filePath;
@@ -533,7 +605,7 @@ export function activate(context: vscode.ExtensionContext) {
                             });
                             
                             const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
-                            fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
+                            fullDetailsMarkdown += `- **${lineLabel}:** ${message}${codeSnippet}\n`;
                         });
                         
                         fullDetailsMarkdown += `\n`;
@@ -544,25 +616,27 @@ export function activate(context: vscode.ExtensionContext) {
             // Handle any other production patterns not in the standard order
             productionViolationsByPattern.forEach((fileMap, pattern) => {
                 if (!patternOrder.includes(pattern)) {
-                    hasProductionViolations = true;
+                    hasProductionViolationsInDetails = true;
                     const patternEmoji = getPatternEmoji(pattern);
-                    fullDetailsMarkdown += `## ${patternEmoji} ${pattern}\n\n`;
+                    fullDetailsMarkdown += `---\n\n## ${patternEmoji} ${pattern}\n\n`;
                     
                     const sortedFiles = Array.from(fileMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                     
                     sortedFiles.forEach(([filePath, violations]) => {
-                        let relativePath: string;
-                        try {
-                            relativePath = vscode.workspace.asRelativePath(violations[0].uri, false);
-                        } catch {
-                            relativePath = path.relative(workspaceRoot, filePath);
-                        }
-                        relativePath = relativePath.split(path.sep).join('/');
+                        // Get workspace-relative path (portable, no absolute paths)
+                        const relativePath = getWorkspaceRelativePath(violations[0].uri, workspaceRoot);
                         
-                        fullDetailsMarkdown += `### \`${relativePath}\`\n\n`;
+                        // Use workspace-relative path for VS Code-compatible links (works across machines/OS)
+                        const linkPathOther = relativePath;
+                        fullDetailsMarkdown += `### [\`${relativePath}\`](${linkPathOther})\n\n`;
                         violations.sort((a, b) => a.line - b.line);
                         violations.forEach(({ diagnostic, line }) => {
                             const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
+                            
+                            // Detect file-level violations (God Class spans entire file)
+                            const isFileLevel = diagnostic.range.end.line - diagnostic.range.start.line > 10 || 
+                                               pattern === 'God Class';
+                            const lineLabel = isFileLevel ? 'File-level' : `Line ${line}`;
                             
                             // Find corresponding raw issue for code snippet (CI/CD evidence)
                             const rawIssue = allRawIssues.find(issue => {
@@ -571,7 +645,7 @@ export function activate(context: vscode.ExtensionContext) {
                             });
                             
                             const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
-                            fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
+                            fullDetailsMarkdown += `- **${lineLabel}:** ${message}${codeSnippet}\n`;
                         });
                         fullDetailsMarkdown += `\n`;
                     });
@@ -579,33 +653,29 @@ export function activate(context: vscode.ExtensionContext) {
             });
 
             // THEN show all test violations with a single heading
-            let hasTestViolations = false;
-            testViolationsByPattern.forEach(() => { hasTestViolations = true; });
+            const hasTestViolationsInDetails = testViolationsByPattern.size > 0;
             
-            if (hasTestViolations) {
+            if (hasTestViolationsInDetails) {
                 fullDetailsMarkdown += `---\n\n`;
-                fullDetailsMarkdown += `## 🧪 Test File Violations (excluded from score calculation)\n\n`;
+                fullDetailsMarkdown += `## 🧪 Test File Violations\n\n`;
+                fullDetailsMarkdown += `The following signals were detected in test files.\n`;
+                fullDetailsMarkdown += `Test file signals are excluded from the architectural drift snapshot.\n\n`;
                 
                 patternOrder.forEach(pattern => {
                     if (testViolationsByPattern.has(pattern)) {
                         const patternEmoji = getPatternEmoji(pattern);
-                        fullDetailsMarkdown += `### ${patternEmoji} ${pattern}\n\n`;
+                        fullDetailsMarkdown += `---\n\n### ${patternEmoji} ${pattern}\n\n`;
                         
                         const fileMap = testViolationsByPattern.get(pattern)!;
                         const sortedFiles = Array.from(fileMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                         
                         sortedFiles.forEach(([filePath, violations]) => {
-                            // Get relative path for display (normalized to forward slashes)
-                            let relativePath: string;
-                            try {
-                                relativePath = vscode.workspace.asRelativePath(violations[0].uri, false);
-                            } catch {
-                                relativePath = path.relative(workspaceRoot, filePath);
-                            }
-                            // Normalize to forward slashes for consistency
-                            relativePath = relativePath.split(path.sep).join('/');
+                            // Get workspace-relative path (portable, no absolute paths)
+                            const relativePath = getWorkspaceRelativePath(violations[0].uri, workspaceRoot);
                             
-                            fullDetailsMarkdown += `#### \`${relativePath}\` *(test file)*\n\n`;
+                            // Use workspace-relative path for VS Code-compatible links (works across machines/OS)
+                            const linkPathTest = relativePath;
+                            fullDetailsMarkdown += `#### [\`${relativePath}\`](${linkPathTest}) *(test file)*\n\n`;
                             
                             // Sort violations by line number
                             violations.sort((a, b) => a.line - b.line);
@@ -614,6 +684,11 @@ export function activate(context: vscode.ExtensionContext) {
                                 // Extract message without [Pattern] prefix
                                 const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
                                 
+                                // Detect file-level violations (God Class spans entire file)
+                                const isFileLevel = diagnostic.range.end.line - diagnostic.range.start.line > 10 || 
+                                                   pattern === 'God Class';
+                                const lineLabel = isFileLevel ? 'File-level' : `Line ${line}`;
+                                
                                 // Find corresponding raw issue for code snippet (CI/CD evidence)
                                 const rawIssue = allRawIssues.find(issue => {
                                     const issueFilePath = (issue as any).filePath;
@@ -621,7 +696,7 @@ export function activate(context: vscode.ExtensionContext) {
                                 });
                                 
                                 const codeSnippet = rawIssue?.codeSnippet ? `\n  \`\`\`\n${rawIssue.codeSnippet}\n  \`\`\`` : '';
-                                fullDetailsMarkdown += `- **Line ${line}:** ${message}${codeSnippet}\n`;
+                                fullDetailsMarkdown += `- **${lineLabel}:** ${message}${codeSnippet}\n`;
                             });
                             
                             fullDetailsMarkdown += `\n`;
@@ -633,24 +708,27 @@ export function activate(context: vscode.ExtensionContext) {
                 testViolationsByPattern.forEach((fileMap, pattern) => {
                     if (!patternOrder.includes(pattern)) {
                         const patternEmoji = getPatternEmoji(pattern);
-                        fullDetailsMarkdown += `### ${patternEmoji} ${pattern}\n\n`;
+                        fullDetailsMarkdown += `---\n\n### ${patternEmoji} ${pattern}\n\n`;
                         
                         const sortedFiles = Array.from(fileMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
                         
                         sortedFiles.forEach(([filePath, violations]) => {
-                            let relativePath: string;
-                            try {
-                                relativePath = vscode.workspace.asRelativePath(violations[0].uri, false);
-                            } catch {
-                                relativePath = path.relative(workspaceRoot, filePath);
-                            }
-                            relativePath = relativePath.split(path.sep).join('/');
+                            // Get workspace-relative path (portable, no absolute paths)
+                            const relativePath = getWorkspaceRelativePath(violations[0].uri, workspaceRoot);
                             
-                            fullDetailsMarkdown += `#### \`${relativePath}\` *(test file)*\n\n`;
+                            // Use workspace-relative path for VS Code-compatible links (works across machines/OS)
+                            const linkPathTestOther = relativePath;
+                            fullDetailsMarkdown += `#### [\`${relativePath}\`](${linkPathTestOther}) *(test file)*\n\n`;
                             violations.sort((a, b) => a.line - b.line);
                             violations.forEach(({ diagnostic, line }) => {
                                 const message = diagnostic.message.replace(/^\[[^\]]+\]\s*/, '');
-                                fullDetailsMarkdown += `- **Line ${line}:** ${message}\n`;
+                                
+                                // Detect file-level violations (God Class spans entire file)
+                                const isFileLevel = diagnostic.range.end.line - diagnostic.range.start.line > 10 || 
+                                                   pattern === 'God Class';
+                                const lineLabel = isFileLevel ? 'File-level' : `Line ${line}`;
+                                
+                                fullDetailsMarkdown += `- **${lineLabel}:** ${message}\n`;
                             });
                             fullDetailsMarkdown += `\n`;
                         });
@@ -663,7 +741,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             fullDetailsMarkdown += `---\n\n`;
-            fullDetailsMarkdown += `Generated by ArchDrift v0.4\n`;
+            fullDetailsMarkdown += `Generated by ArchDrift v1.0\n`;
 
             // Save reports to .archdrift/audits/ folder
             if (workspaceFolder) {

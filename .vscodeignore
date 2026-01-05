@@ -1,5 +1,6 @@
 .vscode/**
 .vscode-test/**
+.cursor/**
 src/**
 .gitignore
 .yarnrc
@@ -14,6 +15,7 @@ FINAL_LEADERBOARD.md
 WORKSPACE_INDEX.md
 CRITICAL_FIXES_PHASE1.md
 PHASE1_HARDENING.md
+METHODOLOGY.md
 *.ps1
 *.sh
 **/node_modules/**
