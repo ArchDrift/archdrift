@@ -3,6 +3,8 @@
 Architectural smoke detector for TypeScript codebases.
 Detects structural erosion while you're coding, not months later in refactors.
 
+![Demo](demo.gif)
+
 ## What You'll See After Installing
 
 - Open a TypeScript or JavaScript file
@@ -23,7 +25,7 @@ Forbidden dependencies between architectural layers. Flags when domain logic imp
 Database or API calls executed inside loops, indicating potential performance bottlenecks.
 
 ### God Classes
-Files exceeding maintainability thresholds (1,501+ lines for regular files, 2,501+ for type definitions).
+Files exceeding 800 lines of code. Large Class: 801-1,500 lines. Monolith: 1,501+ lines (2,500+ for type definitions).
 
 ## Calibration
 
@@ -74,13 +76,27 @@ ArchDrift summarizes detected signals into a drift snapshot designed to be compa
 
 ## Real-World Results
 
-From the 43-repository audit:
-- **Storybook**: 0.4% drift (1,879 files, 166K LOC)
-- **Angular**: 2.1% drift (2,720 files, 255K LOC)
-- **Prisma**: 13.4% drift (881 files, 58K LOC)
-- **Lodash**: 13.8% drift (13 files, 26K LOC) — utility library, domain-adjusted
+Selected examples from an audit of 43 TypeScript repositories:
 
-Repository size doesn't determine drift. Architecture discipline does.
+- **Storybook** — 0.2% drift  
+  Large UI system with near-zero architectural drift; risk is isolated to a small number of oversized data and story files.
+
+- **VS Code** — 5.1% drift  
+  Extremely large, long-lived codebase where drift is driven by accumulated complexity rather than structural violations.
+
+- **create-t3-app** — 2.6% drift  
+  Lean modern full-stack starter; drift signals come exclusively from data-access patterns, not architecture.
+
+- **Cal.com** — 3.5% drift  
+  Product-driven SaaS with drift concentrated in performance-sensitive paths due to repeated data access inside loops.
+
+- **Prisma** — 19.3% drift  
+  Structurally disciplined core with elevated drift from performance-heavy client generation logic.
+
+- **Directus** — 46.3% drift  
+  Backend platform where architectural drift is dominated by internal service coupling to API layers, indicating structural erosion rather than isolated code smells.
+
+Most production codebases tend toward one of these profiles over time. ArchDrift shows which direction yours is moving - and whether that movement is accelerating.
 
 ## License
 

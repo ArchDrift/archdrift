@@ -62,6 +62,7 @@ export interface AnalysisResult {
     // New: Raw issues array and summary
     rawIssues: RawIssue[];
     summary: IssueSummary;
+    codeLineCount: number; // Exposed for reuse to avoid duplicate getText() calls
 }
 
 // Configurable violation weights (can be moved to config file in future)
@@ -1103,6 +1104,8 @@ function groupIssuesByPattern(rawIssues: RawIssue[]): IssueSummary {
 export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: string | null = null, outputChannel?: vscode.OutputChannel): AnalysisResult {
     const text = document.getText();
     const languageId = document.languageId;
+    // Cache lines array to avoid multiple splits
+    const lines = text.split('\n');
     const codeLineCount = countCodeLines(text, languageId);
     const nPlusOneResult = detectNPlusOneQueries(text, languageId);
     const nPlusOneViolations = nPlusOneResult.violations;
@@ -1120,6 +1123,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
     const sourceLayer = detectLayer(normalizedSourcePath);
     
     // Debug logging - log to output channel if available, otherwise console
+    // Disabled for workspace scans (outputChannel is undefined during workspace scans)
     const logMsg = `[ArchDrift] Analyzing file: ${filePath.split(path.sep).pop()}\n  Path: ${filePath}\n  Workspace: ${workspaceRoot || 'null'}\n  Normalized: ${normalizedSourcePath}\n  Layer: ${sourceLayer || 'null'}`;
     if (outputChannel) {
         outputChannel.appendLine(logMsg);
@@ -1153,7 +1157,7 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
         // - Low ratio of function implementations
         const typeKeywords = (fileContent.match(/\b(type|interface|enum|namespace|schema)\s+/g) || []).length;
         const functionKeywords = (fileContent.match(/\b(function|const|let|var)\s+\w+\s*[=:]/g) || []).length;
-        const totalLines = text.split('\n').length;
+        const totalLines = lines.length;
         
         // If type keywords are >30% of total lines or >2x function keywords, likely a type definition file
         if (totalLines > 0 && (typeKeywords / totalLines > 0.3 || (functionKeywords > 0 && typeKeywords / functionKeywords > 2))) {
@@ -1182,7 +1186,6 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
         }
         
         // Get code snippet (first 3 lines of file for context)
-        const lines = text.split('\n');
         const codeSnippet = lines.slice(0, Math.min(3, lines.length)).join('\n').substring(0, 200);
         
         rawIssues.push({
@@ -1217,7 +1220,6 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
                 : `Database/API call inside loop. Consider batching queries or moving the call outside the loop.`;
             
             // Get code snippet (violation line + 2 lines of context)
-            const lines = text.split('\n');
             const startLine = Math.max(0, lineIndex - 1);
             const endLine = Math.min(lines.length, lineIndex + 2);
             const codeSnippet = lines.slice(startLine, endLine).join('\n').substring(0, 200);
@@ -1241,7 +1243,6 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
     // Collect Layer Violation issues
     layerViolations.forEach(violation => {
         // Get code snippet (violation line + 2 lines of context)
-        const lines = text.split('\n');
         const lineIndex = Math.max(0, Math.min(violation.line - 1, lines.length - 1));
         const startLine = Math.max(0, lineIndex - 1);
         const endLine = Math.min(lines.length, lineIndex + 2);
@@ -1273,7 +1274,8 @@ export function analyzeDocument(document: vscode.TextDocument, workspaceRoot: st
         },
         layerViolations: layerViolations,
         rawIssues: rawIssues,
-        summary: summary
+        summary: summary,
+        codeLineCount: codeLineCount // Exposed for reuse to avoid duplicate getText() calls
     };
 }
 
@@ -1290,7 +1292,7 @@ export function isProductionCode(filePath: string, workspaceRoot: string | null 
         '/spec/', '/specs/',
         '.test.', '.spec.',
         '/coverage/', '/.nyc_output/',
-        '/bench/', '/benchmark/', '/benchmarks/',
+        '/bench/', '/benches/', '/benchmark/', '/benchmarks/',
         '/example/', '/examples/',
         '/demo/', '/demos/',
         '/playground/', '/sandbox/'

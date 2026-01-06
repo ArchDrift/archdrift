@@ -95,6 +95,54 @@ export const EXPERT_DIAGNOSIS_TEMPLATES = {
 } as const;
 
 /**
+ * Determines confidence level for domain detection
+ * @param repoName Repository name
+ * @param detectedDomain The detected domain
+ * @returns 'high confidence' if detected via name matching, 'heuristic' otherwise
+ */
+export function getDomainConfidence(repoName: string, detectedDomain: ProjectDomain): 'high confidence' | 'heuristic' {
+    const name = repoName.toLowerCase();
+    
+    // Check if domain would be detected via name matching (high confidence signals)
+    switch (detectedDomain) {
+        case 'FRAMEWORK':
+            if (name.includes('react') || name.includes('vue') || name.includes('angular') || 
+                name.includes('svelte') || name.includes('remix') || name.includes('next') ||
+                name.includes('nest') || name.includes('express') || name.includes('fastify') ||
+                name.includes('hono') || name.includes('storybook')) {
+                return 'high confidence';
+            }
+            break;
+        case 'DATABASE':
+            if (name.includes('prisma') || name.includes('typeorm') || name.includes('sequelize') ||
+                name.includes('mongoose') || name.includes('database') || name.includes('db') ||
+                name.includes('orm') || name.includes('query') || name.includes('directus') ||
+                name.includes('strapi') || name.includes('payload')) {
+                return 'high confidence';
+            }
+            break;
+        case 'UTILITY':
+            if (name.includes('lodash') || name.includes('underscore') || name.includes('ramda') ||
+                name.includes('axios') || name.includes('zod') || name.includes('yup') ||
+                name.includes('validator') || name.includes('utils') || name.includes('helper') ||
+                name.includes('prettier') || name.includes('eslint') || name.includes('biome')) {
+                return 'high confidence';
+            }
+            break;
+        case 'APPLICATION':
+            if (name.includes('app') || name.includes('calcom') || name.includes('plane') ||
+                name.includes('nocodb') || name.includes('immich') || name.includes('tldraw') ||
+                name.includes('excalidraw') || name.includes('vscode')) {
+                return 'high confidence';
+            }
+            break;
+    }
+    
+    // If not detected via name matching, it's heuristic-based
+    return 'heuristic';
+}
+
+/**
  * Detect project domain from repository name and characteristics
  * @param repoName Repository name
  * @param violations Violation counts (used for fallback detection when name doesn't match)
